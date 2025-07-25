@@ -1,16 +1,13 @@
 // Payload头部必须在文件开头，patcher需要
-asm(R"(.text
-
-# Payload头部 - 对应C结构体 payload_header
-original_entrypoint:
-    .word 0x080000c0
-save_size:
-    .word 0x20000
-    .word patched_entrypoint
-
-)");
-
 #include <stdint.h>
+
+// 前向声明
+void patched_entrypoint(void);
+
+// Payload头部结构 - 必须在文件最开始
+__attribute__((section(".text"))) const uint32_t original_entrypoint = 0x080000c0;
+__attribute__((section(".text"))) const uint32_t save_size = 0x20000;
+__attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint32_t)patched_entrypoint;
 
 #define AGB_ROM  ((unsigned char*)0x8000000)
 #define AGB_SRAM ((volatile unsigned char*)0xE000000)
