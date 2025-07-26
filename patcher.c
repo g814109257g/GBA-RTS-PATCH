@@ -201,7 +201,7 @@ int main(int argc, char **argv)
     fflush(outfile);
 
     printf("Patched successfully (keypad mode). Changes written to %s\n", new_filename);
-    scanf("%*s");
+    // scanf("%*s");
 	return 0;
 	
 }

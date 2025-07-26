@@ -66,39 +66,43 @@ void __attribute__((target("thumb"))) flush_sram_manual_entry(void) {
     *ime_reg = old_ime;
 }
 
+// patched_entrypoint - 用naked function改造 (ARM模式)
+__attribute__((naked, target("arm"))) void patched_entrypoint(void)
+{
+    asm volatile(
+        "mov r0, # 0x04000000\n"
+        "adr r1, keypad_irq_handler\n"
+        "str r1, [r0, # -4]\n"
+        
+        "adrl r0, flash_save_sector\n"
+        "mov r1, # 0x0e000000\n"
+        "ldr r2, save_size\n"
+        "add r2, r1\n"
+        "mov r3, # 0x09000000\n"
+        "@ Lock 369in1 mapper\n"
+        "mov r4, # 0x80\n"
+        "strb r4, [r1, # 3]\n"
+        
+        "sram_init_loop:\n"
+        "lsr r4, r1, # 16\n"
+        "and r4, # 1\n"
+        "strh r4, [r3]\n"
+        "nop\n"
+        "ldrb r4, [r0], # 1\n"
+        "strb r4, [r1], # 1\n"
+        "cmp r1, r2\n"
+        "blo sram_init_loop\n"
+        
+        "@ Set bank to 0 for banking-unaware software\n"
+        "mov r4, # 0\n"
+        "strh r4, [r3]\n"
+        
+        "ldr pc, original_entrypoint\n"
+        ::: "memory"
+    );
+}
+
 asm(R"(
-
-.arm
-patched_entrypoint:
-    mov r0, # 0x04000000
-    adr r1, keypad_irq_handler
-    str r1, [r0, # -4]
-
-    adrl r0, flash_save_sector
-    mov r1, # 0x0e000000
-    ldr r2, save_size
-    add r2, r1
-    mov r3, # 0x09000000
-    # Lock 369in1 mapper
-    mov r4, # 0x80
-    strb r4, [r1, # 3]
-sram_init_loop:
-    lsr r4, r1, # 16
-    and r4, # 1
-    strh r4, [r3]
-    nop
-    ldrb r4, [r0], # 1
-    strb r4, [r1], # 1
-    cmp r1, r2
-    blo sram_init_loop
-    
-    # Set bank to 0 for banking-unaware software
-    mov r4, # 0
-    strh r4, [r3]
-
-    ldr pc, original_entrypoint
-
-.thumb
 
 .arm
 # IRQ handlers are called with 0x04000000 in r0 which is handy!
