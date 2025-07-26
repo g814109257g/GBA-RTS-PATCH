@@ -65,44 +65,6 @@ void __attribute__((target("thumb"))) flush_sram_manual_entry(void) {
     // 恢复中断状态
     *ime_reg = old_ime;
 }
-
-// patched_entrypoint - 用naked function改造 (ARM模式)
-__attribute__((naked, target("arm"))) void patched_entrypoint(void)
-{
-    asm volatile(
-        "mov r0, # 0x04000000\n"
-        "adr r1, keypad_irq_handler\n"
-        "str r1, [r0, # -4]\n"
-        
-        "adrl r0, flash_save_sector\n"
-        "mov r1, # 0x0e000000\n"
-        "ldr r2, save_size\n"
-        "add r2, r1\n"
-        "mov r3, # 0x09000000\n"
-        "@ Lock 369in1 mapper\n"
-        "mov r4, # 0x80\n"
-        "strb r4, [r1, # 3]\n"
-        
-        "sram_init_loop:\n"
-        "lsr r4, r1, # 16\n"
-        "and r4, # 1\n"
-        "strh r4, [r3]\n"
-        "nop\n"
-        "ldrb r4, [r0], # 1\n"
-        "strb r4, [r1], # 1\n"
-        "cmp r1, r2\n"
-        "blo sram_init_loop\n"
-        
-        "@ Set bank to 0 for banking-unaware software\n"
-        "mov r4, # 0\n"
-        "strh r4, [r3]\n"
-        
-        "ldr pc, original_entrypoint\n"
-        ::: "memory"
-    );
-}
-
-
 // C语言版本的按键中断处理程序
 __attribute__((target("arm"))) void keypad_irq_handler(void)
 {
@@ -146,6 +108,63 @@ __attribute__((target("arm"))) void keypad_irq_handler(void)
     void (*original_handler)(void) = (void (*)(void))(*original_irq_handler);
     original_handler();
 }
+
+// C语言版本的补丁入口点（位置无关代码）
+__attribute__((target("arm"))) void patched_entrypoint(void)
+{
+    uint32_t irq_handler_addr, flash_src_addr, save_size_value, original_entry_addr;
+    
+    // 使用内联汇编获取相对地址，避免GOT依赖
+    asm volatile(
+        "mov r0, #0x04000000\n"
+        "adr %0, keypad_irq_handler\n"     // 获取keypad_irq_handler相对地址
+        "str %0, [r0, #-4]\n"              // 设置IRQ向量
+        
+        "adrl %1, flash_save_sector\n"     // 获取flash_save_sector相对地址
+        "ldr %2, save_size\n"              // 加载save_size值
+        "ldr %3, original_entrypoint\n"    // 加载original_entrypoint值
+        : "=&r"(irq_handler_addr), "=&r"(flash_src_addr), "=&r"(save_size_value), "=&r"(original_entry_addr)
+        :
+        : "r0", "memory"
+    );
+    
+    // 初始化变量
+    volatile uint8_t *flash_src = (volatile uint8_t*)flash_src_addr;
+    volatile uint8_t *sram_dst = (volatile uint8_t*)0x0E000000;
+    volatile uint8_t *sram_end = sram_dst + save_size_value;
+    volatile uint16_t *bank_reg = (volatile uint16_t*)0x09000000;
+    
+    // 锁定369in1 mapper
+    *(volatile uint8_t*)(0x0E000000 + 3) = 0x80;
+    
+    // SRAM初始化循环
+    while (sram_dst < sram_end) {
+        // 计算当前bank (根据SRAM地址的bit 16)
+        uint16_t current_bank = ((uint32_t)sram_dst >> 16) & 1;
+        *bank_reg = current_bank;
+        
+        // 复制一个字节
+        *sram_dst = *flash_src;
+        
+        // 递增指针
+        flash_src++;
+        sram_dst++;
+    }
+    
+    // 设置bank为0（为不支持bank的软件）
+    *bank_reg = 0;
+    
+    // 跳转到原始入口点
+    asm volatile(
+        "mov pc, %0\n"
+        :
+        : "r"(original_entry_addr)
+        : "memory"
+    );
+}
+
+
+
 
 asm(R"(
 
@@ -270,7 +289,7 @@ flash_fn_table:
 
 )");
 
-// 在RAM中运行函数 - 用naked function改造 (ARM模式)
+// 在RAM中运行函数 - 用naked function改造 (ARM模式),由于涉及栈指针操作，所以只能用汇编
 __attribute__((naked, target("arm"))) void run_from_ram(void)
 {
     asm volatile(
