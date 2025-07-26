@@ -17,6 +17,13 @@ __attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint
 
 #define _FLASH_WRITE(pa, pd) { *(((unsigned short *)AGB_ROM)+((pa)/2)) = pd; __asm("nop"); }
 
+// 定义获取相对地址的宏
+#define GET_REL_ADDR(symbol, var) \
+    asm volatile("adrl %0, " #symbol : "=r"(var))
+
+#define GET_REL_VALUE(symbol, var) \
+    asm volatile("ldr %0, " #symbol : "=r"(var))
+
 // 前向声明
 void patched_entrypoint(void);
 extern void flush_sram(void);
@@ -109,26 +116,23 @@ __attribute__((target("arm"))) void keypad_irq_handler(void)
     original_handler();
 }
 
+
 // C语言版本的补丁入口点（位置无关代码）
 __attribute__((target("arm"))) void patched_entrypoint(void)
 {
     uint32_t irq_handler_addr, flash_src_addr, save_size_value, original_entry_addr;
     
-    // 使用内联汇编获取相对地址，避免GOT依赖
-    asm volatile(
-        "mov r0, #0x04000000\n"
-        "adr %0, keypad_irq_handler\n"     // 获取keypad_irq_handler相对地址
-        "str %0, [r0, #-4]\n"              // 设置IRQ向量
-        
-        "adrl %1, flash_save_sector\n"     // 获取flash_save_sector相对地址
-        "ldr %2, save_size\n"              // 加载save_size值
-        "ldr %3, original_entrypoint\n"    // 加载original_entrypoint值
-        : "=&r"(irq_handler_addr), "=&r"(flash_src_addr), "=&r"(save_size_value), "=&r"(original_entry_addr)
-        :
-        : "r0", "memory"
-    );
+    // 使用宏获取相对地址，避免GOT依赖
+    GET_REL_ADDR(keypad_irq_handler, irq_handler_addr);
+    GET_REL_ADDR(flash_save_sector, flash_src_addr);
+    GET_REL_VALUE(save_size, save_size_value);
+    GET_REL_VALUE(original_entrypoint, original_entry_addr);
     
-    // 初始化变量
+    // 设置按键中断处理程序到 [0x04000000-4] = 0x03FFFFFC
+    volatile uint32_t *irq_vector = (volatile uint32_t*)0x03FFFFFC;
+    *irq_vector = irq_handler_addr;
+    
+    // 初始化变量，现在可以直接用C语言指针操作
     volatile uint8_t *flash_src = (volatile uint8_t*)flash_src_addr;
     volatile uint8_t *sram_dst = (volatile uint8_t*)0x0E000000;
     volatile uint8_t *sram_end = sram_dst + save_size_value;
