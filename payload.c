@@ -271,15 +271,6 @@ flash_fn_table:
 
 )");
 
-// 空闲中断处理函数 - 用naked function改造 (ARM模式)
-__attribute__((naked, target("arm"))) void idle_irq_handler(void)
-{
-    asm volatile(
-        "ldr pc, [r0, # -12]\n"
-        ::: "memory"
-    );
-}
-
 // 在RAM中运行函数 - 用naked function改造 (ARM模式)
 __attribute__((naked, target("arm"))) void run_from_ram(void)
 {
