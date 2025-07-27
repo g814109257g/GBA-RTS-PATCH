@@ -163,8 +163,8 @@ int main(int argc, char **argv)
 
     // 设置payload中的save_size字段（见payload.c头部，决定SRAM保存区大小）
     // payload.c: __attribute__((section(".text"))) const uint32_t save_size = 0x20000;
-    // 这里将其覆盖为0x8000（32KB，常见SRAM大小）
-    SAVE_SIZE[(uint32_t*) &rom[payload_base]] = 0x8000;
+    SAVE_SIZE[(uint32_t*) &rom[payload_base]] = 64*1024;
+    //TODO:每个游戏大小都应该不一样的。现在先写死了64KB（512Kb）
 
     // 修改ROM入口点，使其跳转到payload中的patched_entrypoint
     // 并将原入口点地址写入payload的original_entrypoint字段（payload.c头部）

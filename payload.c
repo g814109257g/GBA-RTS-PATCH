@@ -4,7 +4,7 @@
 // 前向声明
 void patched_entrypoint(void);
 
-// Payload头部结构 - 必须在文件最开始
+// Payload头部结构 - 必须在文件最开始,然后必须是强行改为text，否则无法获取相对偏移 
 __attribute__((section(".text"))) const uint32_t original_entrypoint = 0x080000c0;
 __attribute__((section(".text"))) const uint32_t save_size = 0x20000;
 __attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint32_t)patched_entrypoint;
