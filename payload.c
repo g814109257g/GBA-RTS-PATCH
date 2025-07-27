@@ -24,23 +24,24 @@ __attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint
 #define GET_REL_VALUE(symbol, var) \
     asm volatile("ldr %0, " #symbol : "=r"(var))
 
-// 前向声明
+// 前向声明  
 void patched_entrypoint(void);
 void flush_sram(void);
+int run_thumb_from_ram(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
 
-// Flash函数声明
-int identify_flash_1(void);
-void erase_flash_1(unsigned sa, unsigned save_size);
-void program_flash_1(unsigned sa, unsigned save_size);
-int identify_flash_2(void);
-void erase_flash_2(unsigned sa, unsigned save_size);
-void program_flash_2(unsigned sa, unsigned save_size);
-int identify_flash_3(void);
-void erase_flash_3(unsigned sa, unsigned save_size);
-void program_flash_3(unsigned sa, unsigned save_size);
-int identify_flash_4(void);
-void erase_flash_4(unsigned sa, unsigned save_size);
-void program_flash_4(unsigned sa, unsigned save_size);
+// Flash函数声明 - 显式标记为Thumb模式
+__attribute__((target("thumb"))) int identify_flash_1(void);
+__attribute__((target("thumb"))) void erase_flash_1(unsigned sa, unsigned save_size);
+__attribute__((target("thumb"))) void program_flash_1(unsigned sa, unsigned save_size);
+__attribute__((target("thumb"))) int identify_flash_2(void);
+__attribute__((target("thumb"))) void erase_flash_2(unsigned sa, unsigned save_size);
+__attribute__((target("thumb"))) void program_flash_2(unsigned sa, unsigned save_size);
+__attribute__((target("thumb"))) int identify_flash_3(void);
+__attribute__((target("thumb"))) void erase_flash_3(unsigned sa, unsigned save_size);
+__attribute__((target("thumb"))) void program_flash_3(unsigned sa, unsigned save_size);
+__attribute__((target("thumb"))) int identify_flash_4(void);
+__attribute__((target("thumb"))) void erase_flash_4(unsigned sa, unsigned save_size);
+__attribute__((target("thumb"))) void program_flash_4(unsigned sa, unsigned save_size);
 
 // Assembly标签外部声明
 extern char identify_flash_1_end[];
@@ -189,7 +190,7 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
         beq flush_sram_done
         add r2, r7
         add r3, r7
-        bl run_from_ram
+        bl run_thumb_from_ram
         cmp r0, #0
         bne found_flash
         add r6, # 16
@@ -201,13 +202,13 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
         mov r1, r5
         add r2, r7
         add r3, r7
-        bl run_from_ram
+        bl run_thumb_from_ram
         ldm r6!, {r2, r3}
         mov r0, r4
         mov r1, r5
         add r2, r7
         add r3, r7
-        bl run_from_ram
+        bl run_thumb_from_ram
 
     flush_sram_done:
     )" ::: "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "lr", "memory");
@@ -259,29 +260,41 @@ flash_fn_table:
 
 )");
 
-// 在RAM中运行函数 - 用naked function改造 (ARM模式),由于涉及栈指针操作，所以只能用汇编
-__attribute__((naked, target("arm"))) void run_from_ram(void)
+// 在RAM中运行Thumb函数 - 混合C和汇编实现
+__attribute__((target("arm"))) 
+int run_thumb_from_ram(uint32_t arg0, uint32_t arg1, uint32_t func_start, uint32_t func_end)
 {
+    int result;
+    
     asm volatile(
         "push {r4, r5, lr}\n"
-        "mov r4, sp\n"
-        "bic r2, # 1\n"
+        "mov r4, sp\n"                    // 保存当前栈指针
+        "bic %[start], %[start], #1\n"    // 清除Thumb位，得到实际函数地址
         
-        "run_from_ram_loop:\n"    
-        "ldr r5, [r3, # -4]!\n"
+        "run_copy_loop:\n"    
+        "ldr r5, [%[end], #-4]!\n"        // 从函数末尾向前复制
         "push {r5}\n"
-        "cmp r2, r3\n"
-        "bne run_from_ram_loop\n"
+        "cmp %[start], %[end]\n"
+        "bne run_copy_loop\n"
         
-        "add r2, sp, # 1\n"
-        "mov lr, pc\n"
-        "bx r2\n"
+        // 设置调用参数和Thumb位
+        "mov r0, %[arg0]\n"               // 第一个参数
+        "mov r1, %[arg1]\n"               // 第二个参数  
+        "add r2, sp, #1\n"                // 栈上函数地址+1(Thumb位)
+        "mov lr, pc\n"                    // 设置返回地址
+        "bx r2\n"                         // 调用Thumb函数
         
-        "mov sp, r4\n"
+        "mov %[result], r0\n"             // 保存返回值
+        "mov sp, r4\n"                    // 恢复栈指针
         "pop {r4, r5, lr}\n"
-        "bx lr\n"
-        ::: "memory"
+        
+        : [result] "=r" (result)
+        : [arg0] "r" (arg0), [arg1] "r" (arg1), 
+          [start] "r" (func_start), [end] "r" (func_end)
+        : "r0", "r1", "r2", "r4", "r5", "lr", "memory"
     );
+    
+    return result;
 }
 
 int identify_flash_1()
