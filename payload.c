@@ -175,14 +175,22 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
     dma_regs[3] = hw_base[0x00DE/2];  // DMA3CNT_H
     hw_base[0x00DE/2] = 0;
     
-    // 核心flash操作逻辑（保持原始汇编）
+    // 用C代码获取地址和值，避免GOT依赖
+    uint32_t flash_sector_addr, save_size_value, flash_fn_table_addr, original_entry_addr;
+    GET_REL_ADDR(flash_save_sector, flash_sector_addr);
+    flash_sector_addr -= 0x08000000;  // 转换为flash内偏移
+    GET_REL_VALUE(save_size, save_size_value);
+    GET_REL_ADDR(flash_fn_table, flash_fn_table_addr);
+    GET_REL_ADDR(original_entrypoint, original_entry_addr);
+    
+    // 核心flash操作逻辑（地址通过C代码传入）
     asm volatile(R"(
         # Try flushing for various flash chips
-        adrl r4, flash_save_sector
-        sub r4, # 0x08000000
-        ldr r5, save_size
-        adr r6, flash_fn_table 
-        adr r7, original_entrypoint 
+        # r4=flash_sector_addr, r5=save_size_value, r6=flash_fn_table_addr, r7=original_entry_addr
+        mov r4, %[flash_addr]
+        mov r5, %[save_size]
+        mov r6, %[fn_table]
+        mov r7, %[orig_entry]
         
     try_flash:
         ldm r6!, {r2, r3}
@@ -211,7 +219,11 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
         bl run_thumb_from_ram
 
     flush_sram_done:
-    )" ::: "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "lr", "memory");
+    )" 
+    :
+    : [flash_addr] "r" (flash_sector_addr), [save_size] "r" (save_size_value), 
+      [fn_table] "r" (flash_fn_table_addr), [orig_entry] "r" (original_entry_addr)
+    : "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "lr", "memory");
     
     // 恢复DMA状态
     hw_base[0x00DE/2] = dma_regs[3];
