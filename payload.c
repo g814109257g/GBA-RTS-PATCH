@@ -57,21 +57,6 @@ extern char erase_flash_4_end[];
 extern char program_flash_4_end[];
 
 
-// C语言版本的手动SRAM刷新函数
-void __attribute__((target("thumb"))) flush_sram_manual_entry(void) {
-    // IME寄存器 - Interrupt Master Enable Register (0x04000208)
-    volatile uint16_t *ime_reg = (volatile uint16_t*)0x04000208;
-    
-    // 保存当前中断状态并禁用中断
-    uint16_t old_ime = *ime_reg;
-    *ime_reg = 0;
-    
-    // 调用flush_sram函数 (编译器会自动处理Thumb→ARM模式切换)
-    flush_sram();
-    
-    // 恢复中断状态
-    *ime_reg = old_ime;
-}
 // C语言版本的按键中断处理程序
 __attribute__((target("arm"))) void keypad_irq_handler(void)
 {
@@ -176,6 +161,8 @@ asm(R"(
 
 # Ensure interrupts are disabled and there is plenty of stack space before calling
 flush_sram:
+#.type	flush_sram, %function
+#加了这一行东西就会炸
     mov r0, # 0x04000000
     # save sound state then disable it
     ldrh r2, [r0, # 0x0080]
