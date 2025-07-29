@@ -118,12 +118,14 @@ int main(int argc, char **argv)
     }
 
     // 查找插入payload的位置：要求在某个256KB扇区前有一段全0或全0xFF的空间
+    // 需要预留512KB空间供后续扩展使用
+    const int reserved_space = 0x80000; // 512KB
     int payload_base;
-    for (payload_base = romsize - 0x40000 - payload_bin_len; payload_base >= 0; payload_base -= 0x40000)
+    for (payload_base = romsize - reserved_space - payload_bin_len; payload_base >= 0; payload_base -= 0x40000)
     {
         int is_all_zeroes = 1;
         int is_all_ones = 1;
-        for (int i = 0; i < 0x40000 + payload_bin_len; ++i)
+        for (int i = 0; i < reserved_space + payload_bin_len; ++i)
         {
             if (rom[payload_base+i] != 0)
             {
@@ -143,28 +145,39 @@ int main(int argc, char **argv)
     if (payload_base < 0)
     {
         puts("ROM too small to install payload.");
-        if (romsize + 0x80000 > 0x2000000)
+        if (romsize + reserved_space > 0x2000000)
         {
-            puts("ROM alraedy max size. Cannot expand. Cannot install payload");
+            puts("ROM already max size. Cannot expand. Cannot install payload");
             scanf("%*s");
             return 1;
         }
         else
         {
             puts("Expanding ROM");
-            romsize += 0x80000;
-            payload_base = romsize - 0x40000 - payload_bin_len;
+            romsize += reserved_space;
+            payload_base = romsize - reserved_space - payload_bin_len;
         }
     }
 
     printf("Installing payload at offset %x\n", payload_base);
+    printf("Payload ROM address: 0x%08X\n", 0x08000000 + payload_base);
+    printf("Payload size: %u bytes (0x%X)\n", payload_bin_len, payload_bin_len);
+    
     // 拷贝payload_bin到ROM指定位置
     memcpy(rom + payload_base, payload_bin, payload_bin_len);
 
     // 设置payload中的save_size字段（见payload.c头部，决定SRAM保存区大小）
     // payload.c: __attribute__((section(".text"))) const uint32_t save_size = 0x20000;
+    // 注意：虽然预留了512KB空间，但实际SRAM拷贝仍然只使用64KB
     SAVE_SIZE[(uint32_t*) &rom[payload_base]] = 64*1024;
     //TODO:每个游戏大小都应该不一样的。现在先写死了64KB（512Kb）
+    
+    // 计算并输出SRAM保存空间的基址（在payload之后）
+    uint32_t sram_save_base = payload_base + payload_bin_len;
+    printf("SRAM save space offset: 0x%X\n", sram_save_base);
+    printf("SRAM save space ROM address: 0x%08X\n", 0x08000000 + sram_save_base);
+    printf("Reserved space size: %u KB (0x%X bytes)\n", reserved_space / 1024, reserved_space);
+    printf("Actual SRAM copy size: 64 KB (0x10000 bytes)\n");
 
     // 修改ROM入口点，使其跳转到payload中的patched_entrypoint
     // 并将原入口点地址写入payload的original_entrypoint字段（payload.c头部）
