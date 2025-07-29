@@ -17,6 +17,11 @@ __attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint
 
 #define _FLASH_WRITE(pa, pd) { *(((unsigned short *)AGB_ROM)+((pa)/2)) = pd; __asm("nop"); }
 
+// 扇区定义 - 512KB分为8个64KB的扇区
+#define SECTOR_SIZE 0x10000    // 64KB per sector
+#define TOTAL_SECTORS 8        // 8 sectors total (512KB / 64KB)
+#define SRAM_SAVE_SECTOR 0     // 默认使用扇区0保存SRAM
+
 // 定义获取相对地址的宏
 #define GET_REL_ADDR(symbol, var) \
     asm volatile("adrl %0, " #symbol : "=r"(var))
@@ -32,6 +37,9 @@ int run_thumb_from_ram(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
 // 前向声明函数
 void load_from_flash(void);
 void copy_flash_to_sram(uint32_t flash_addr, uint32_t size);
+void restore_sram_from_sector(int sector_num);
+void erase_all_sectors(int flash_type_index);
+void write_sram_to_sector(int sector_num, int flash_type_index);
 
 // C语言版本的按键中断处理程序  
 __attribute__((target("arm"))) void keypad_irq_handler(void)
@@ -107,8 +115,8 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
     // 锁定369in1 mapper
     *(volatile uint8_t*)(0x0E000000 + 3) = 0x80;
     
-    // 调用通用的Flash到SRAM复制函数
-    copy_flash_to_sram(flash_src_addr, save_size_value);
+    // 从默认扇区恢复SRAM
+    restore_sram_from_sector(SRAM_SAVE_SECTOR);
     
     // 跳转到原始入口点
     asm volatile(
@@ -150,7 +158,7 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
     GET_REL_ADDR(original_entrypoint, original_entry_addr);
     
     // 第一部分：try_flash循环检测（C语言重写）
-    uint32_t fn_table_after_identify = 0;
+    int flash_type_index = -1;
     int identify_result = 0;
     
     uint32_t *fn_ptr = (uint32_t*)flash_fn_table_addr;
@@ -172,27 +180,20 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
         identify_result = run_thumb_from_ram(0, 0, identify_start, identify_end);
         
         if (identify_result != 0) {
-            // 找到匹配的flash，设置函数表位置到erase函数
-            fn_table_after_identify = (uint32_t)&fn_ptr[i * 6 + 2];
+            // 找到匹配的flash，记录索引
+            flash_type_index = i;
             break;
         }
         // 如果没找到，继续下一个条目（for循环自动递增i）
     }
     
-    // 如果找到匹配的flash，执行第二部分（C语言重写）
-    if (identify_result != 0) {
-        uint32_t *erase_prog_ptr = (uint32_t*)fn_table_after_identify;
+    // 如果找到匹配的flash，执行擦除和写入
+    if (identify_result != 0 && flash_type_index >= 0) {
+        // 先擦除整个512KB
+        erase_all_sectors(flash_type_index);
         
-        // 读取并调用erase函数，擦除512KB空间
-        uint32_t erase_start = erase_prog_ptr[0] + original_entry_addr;
-        uint32_t erase_end = erase_prog_ptr[1] + original_entry_addr;
-        const uint32_t erase_size = 0x80000; // 512KB
-        run_thumb_from_ram(flash_sector_addr, erase_size, erase_start, erase_end);
-        
-        // 读取并调用program函数
-        uint32_t program_start = erase_prog_ptr[2] + original_entry_addr;
-        uint32_t program_end = erase_prog_ptr[3] + original_entry_addr;
-        run_thumb_from_ram(flash_sector_addr, save_size_value, program_start, program_end);
+        // 然后写入默认扇区
+        write_sram_to_sector(SRAM_SAVE_SECTOR, flash_type_index);
     }
     
     // 恢复DMA状态
@@ -254,16 +255,8 @@ __attribute__((target("arm"))) void load_from_flash(void)
     dma_regs[3] = hw_base[0x00DE/2];  // DMA3CNT_H
     hw_base[0x00DE/2] = 0;
     
-    // 获取保存的大小信息
-    uint32_t save_size_value;
-    GET_REL_VALUE(save_size, save_size_value);
-    
-    // 获取Flash扇区地址
-    uint32_t flash_sector_addr;
-    GET_REL_ADDR(flash_save_sector, flash_sector_addr);
-    
-    // 调用复用的复制函数
-    copy_flash_to_sram(flash_sector_addr, save_size_value);
+    // 从默认扇区恢复SRAM
+    restore_sram_from_sector(SRAM_SAVE_SECTOR);
     
     // 恢复DMA状态
     hw_base[0x00DE/2] = dma_regs[3];
@@ -677,6 +670,71 @@ void __attribute__((target("thumb"), aligned(4)))  program_flash_4(unsigned sa, 
 asm(".align 2\n"
     "program_flash_4_end:");
 
+// 扇区操作封装函数
+// 擦除整个512KB空间（调用一次即可）
+__attribute__((target("arm"))) void erase_all_sectors(int flash_type_index)
+{
+    // 获取必要的地址
+    uint32_t flash_sector_addr, flash_fn_table_addr, original_entry_addr;
+    GET_REL_ADDR(flash_save_sector, flash_sector_addr);
+    flash_sector_addr -= 0x08000000;  // 转换为flash内偏移
+    GET_REL_ADDR(flash_fn_table, flash_fn_table_addr);
+    GET_REL_ADDR(original_entrypoint, original_entry_addr);
+    
+    // 获取函数表
+    uint32_t *fn_ptr = (uint32_t*)flash_fn_table_addr;
+    
+    // 获取erase函数地址
+    uint32_t erase_start = fn_ptr[flash_type_index * 6 + 2] + original_entry_addr;
+    uint32_t erase_end = fn_ptr[flash_type_index * 6 + 3] + original_entry_addr;
+    
+    // 擦除512KB
+    const uint32_t erase_size = 0x80000; // 512KB
+    run_thumb_from_ram(flash_sector_addr, erase_size, erase_start, erase_end);
+}
+
+// 写入SRAM到指定的64KB扇区（必须先调用erase_all_sectors）
+__attribute__((target("arm"))) void write_sram_to_sector(int sector_num, int flash_type_index)
+{
+    // 验证扇区号
+    if (sector_num >= TOTAL_SECTORS) {
+        return;
+    }
+    
+    // 获取必要的地址
+    uint32_t flash_sector_addr, flash_fn_table_addr, original_entry_addr;
+    GET_REL_ADDR(flash_save_sector, flash_sector_addr);
+    uint32_t sector_offset = flash_sector_addr + (sector_num * SECTOR_SIZE) - 0x08000000;
+    GET_REL_ADDR(flash_fn_table, flash_fn_table_addr);
+    GET_REL_ADDR(original_entrypoint, original_entry_addr);
+    
+    // 获取函数表
+    uint32_t *fn_ptr = (uint32_t*)flash_fn_table_addr;
+    
+    // 获取program函数地址
+    uint32_t program_start = fn_ptr[flash_type_index * 6 + 4] + original_entry_addr;
+    uint32_t program_end = fn_ptr[flash_type_index * 6 + 5] + original_entry_addr;
+    
+    // 写入64KB数据
+    run_thumb_from_ram(sector_offset, SECTOR_SIZE, program_start, program_end);
+}
+
+// 从指定扇区恢复SRAM（64KB）
+__attribute__((target("arm"))) void restore_sram_from_sector(int sector_num)
+{
+    // 验证扇区号
+    if (sector_num >= TOTAL_SECTORS) {
+        return;
+    }
+    
+    // 计算扇区地址
+    uint32_t flash_sector_addr;
+    GET_REL_ADDR(flash_save_sector, flash_sector_addr);
+    uint32_t sector_flash_addr = flash_sector_addr + (sector_num * SECTOR_SIZE);
+    
+    // 复制64KB数据
+    copy_flash_to_sram(sector_flash_addr, SECTOR_SIZE);
+}
 
 asm(R"(
 # The following footer must come last.
