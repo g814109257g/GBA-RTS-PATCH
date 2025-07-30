@@ -9,6 +9,13 @@ __attribute__((section(".text"))) const uint32_t original_entrypoint = 0x080000c
 __attribute__((section(".text"))) const uint32_t save_size = 0x20000;//可能会被patcher.c覆盖，目前覆盖值是64KB
 __attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint32_t)patched_entrypoint;
 
+//默认临时存储地址 (EWRAM区域)
+//0203FFFF - 0203FE00 = 0x1FF, 512字节的空闲区域，这是认为，至少，EWRAM会有这么多的可用空间
+#define SPEND_0x80_ADDR 0x0203FE00
+asm("spend_0x80:\n"
+    ".text\n"
+	".word 0x0203FE00");
+
 #define AGB_ROM  ((unsigned char*)0x8000000)
 #define AGB_SRAM ((volatile unsigned char*)0xE000000)
 #define SRAM_SIZE 64
@@ -41,7 +48,7 @@ typedef struct {
 
 // 前向声明  
 void patched_entrypoint(void);
-void flush_sram(void);
+void rts_save(void);
 int run_thumb_from_ram(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
 
 // 前向声明函数
@@ -68,16 +75,8 @@ __attribute__((target("arm"))) void keypad_irq_handler(void)
     
     // 检查是否按下L+R+START (存档)
     if ((keypad_value & lr_start) == 0) {
-        // 启用绿色交换 (GREEN_SWAP: 0x04000002)
-        volatile uint16_t *green_swap_reg = (volatile uint16_t*)0x04000002;
-        *green_swap_reg = 1;
-        
         // 调用SRAM刷新函数 (存档)
-        flush_sram();
-        
-        // 禁用绿色交换
-        *green_swap_reg = 0;
-        
+        rts_save();
         // 等待按键组合松开
         while (((*keypad_reg) & lr_start) == 0) {
             // 空循环等待
@@ -85,15 +84,9 @@ __attribute__((target("arm"))) void keypad_irq_handler(void)
     }
     // 检查是否按下L+R+SELECT (读档)
     else if ((keypad_value & lr_select) == 0) {
-        // 启用绿色交换 (GREEN_SWAP: 0x04000002)
-        volatile uint16_t *green_swap_reg = (volatile uint16_t*)0x04000002;
-        *green_swap_reg = 1;
 
         // 调用读档函数
         load_from_flash();
-        
-        // 禁用绿色交换
-        *green_swap_reg = 0;
         
         // 等待按键组合松开
         while (((*keypad_reg) & lr_select) == 0) {
@@ -138,8 +131,11 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
 }
 
 
-  __attribute__((target("arm"))) void flush_sram(void)
+  __attribute__((target("arm"))) void rts_save(void)
   {
+    volatile uint16_t *green_swap_reg = (volatile uint16_t*)0x04000002;
+    *green_swap_reg = 1;
+
     // 硬件寄存器基地址
     volatile uint16_t *hw_base = (volatile uint16_t*)0x04000000;
     
@@ -211,6 +207,8 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
     // 恢复sound状态
     hw_base[0x0084/2] = sound_reg2;
     hw_base[0x0080/2] = sound_reg1;
+    
+    *green_swap_reg = 0;
   }
 
 // 通用的Flash到SRAM复制函数 - 复用patched_entrypoint中的逻辑
@@ -242,6 +240,10 @@ __attribute__((target("arm"))) void copy_flash_to_sram(uint32_t flash_addr, uint
 // 读档函数 - 将Flash中的存档恢复到SRAM
 __attribute__((target("arm"))) void load_from_flash(void)
 {
+    // 启用绿色交换 (GREEN_SWAP: 0x04000002)
+    volatile uint16_t *green_swap_reg = (volatile uint16_t*)0x04000002;
+    *green_swap_reg = 1;
+
     // 硬件寄存器基地址
     volatile uint16_t *hw_base = (volatile uint16_t*)0x04000000;
     
@@ -273,6 +275,9 @@ __attribute__((target("arm"))) void load_from_flash(void)
     // 恢复sound状态
     hw_base[0x0084/2] = sound_reg2;
     hw_base[0x0080/2] = sound_reg1;
+    
+    // 禁用绿色交换
+    *green_swap_reg = 0;
 }
     
 asm(R"(
@@ -699,7 +704,7 @@ __attribute__((target("arm"))) void erase_all_sectors(int flash_type_index)
     run_thumb_from_ram(flash_sector_addr, erase_size, erase_start, erase_end);
 }
 
-uint32_t get_sector_addr(int sector_idx){
+__attribute__((target("arm"))) uint32_t get_sector_addr(int sector_idx){
     
     // 获取必要的地址
     uint32_t flash_sector_addr;
