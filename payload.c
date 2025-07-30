@@ -27,7 +27,7 @@ asm("spend_0x80:\n"
 // 扇区定义 - 512KB分为8个64KB的扇区
 #define SECTOR_SIZE 0x10000    // 64KB per sector
 #define TOTAL_SECTORS 8        // 8 sectors total (512KB / 64KB)
-#define SRAM_SAVE_SECTOR 7     // 默认使用扇区0保存SRAM
+#define SRAM_SAVE_SECTOR 7     // 默认使用扇区7保存SRAM
 
 // 定义获取相对地址的宏
 #define GET_REL_ADDR(symbol, var) \
@@ -225,8 +225,21 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
         // 先擦除整个512KB
         erase_all_sectors(flash_type_index);
         
-        // 然后写入默认扇区
+        // 保存原始SRAM到扇区7
         write_sram_to_sector(SRAM_SAVE_SECTOR, flash_type_index);
+        
+        // 保存EWRAM (256KB) 到扇区0-3，每个扇区64KB
+        volatile uint8_t *ewram = (volatile uint8_t*)0x02000000;
+        volatile uint8_t *sram = (volatile uint8_t*)0x0E000000;
+        
+        for (int sector = 0; sector < 4; sector++) {
+            // 复制64KB从EWRAM到SRAM（8bit操作）
+            for (uint32_t i = 0; i < SECTOR_SIZE; i++) {
+                sram[i] = ewram[sector * SECTOR_SIZE + i];
+            }
+            // 写入到对应扇区
+            write_sram_to_sector(sector, flash_type_index);
+        }
     }
     
     // 恢复sound状态（从EZODE看，先恢复主控制寄存器）
