@@ -9,6 +9,9 @@ __attribute__((section(".text"))) const uint32_t original_entrypoint = 0x080000c
 __attribute__((section(".text"))) const uint32_t save_size = 0x20000;//可能会被patcher.c覆盖，目前覆盖值是64KB
 __attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint32_t)patched_entrypoint;
 
+// RTS存档标志字符串 - 必须放在.text段
+__attribute__((section(".text"))) const char rts_flag_string[] = "EZ-OmegaRTCFILE.";
+
 //默认临时存储地址 (EWRAM区域)
 //0203FFFF - 0203FE00 = 0x1FF, 512字节的空闲区域，这是认为，至少，EWRAM会有这么多的可用空间
 #define SPEND_0x80_ADDR 0x0203FE00
@@ -938,7 +941,15 @@ __attribute__((target("arm"))) void save_vram_back_misc_to_flash(int flash_type_
         sram_io2[i] = io_base2[i];
     }
     
-    // 8. 暂时跳过RTS标志字符串（后续再加）
+    // 8. 写入RTS标志字符串到SRAM的0xFFF0偏移
+    // 使用GET_REL_ADDR获取字符串地址
+    uint32_t flag_addr;
+    GET_REL_ADDR(rts_flag_string, flag_addr);
+    const char *flag_ptr = (const char*)flag_addr;
+    volatile uint8_t *sram_flag = sram + 0xFFF0;
+    for (uint32_t i = 0; i < 16; i++) {
+        sram_flag[i] = flag_ptr[i];
+    }
     
     // 写入到扇区6
     write_sram_to_sector(VRAM_BACK_MISC_SECTOR, flash_type_index);
