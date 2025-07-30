@@ -28,6 +28,7 @@ asm("spend_0x80:\n"
 #define SECTOR_SIZE 0x10000    // 64KB per sector
 #define TOTAL_SECTORS 8        // 8 sectors total (512KB / 64KB)
 #define SRAM_SAVE_SECTOR 7     // 默认使用扇区7保存SRAM
+#define EWRAM_START_SECTOR 0   // EWRAM从扇区0开始，占用0-3
 
 // 定义获取相对地址的宏
 #define GET_REL_ADDR(symbol, var) \
@@ -58,6 +59,7 @@ void copy_flash_to_sram(uint32_t flash_addr, uint32_t size);
 void restore_sram_from_sector(int sector_num);
 void erase_all_sectors(int flash_type_index);
 void write_sram_to_sector(int sector_num, int flash_type_index);
+void save_ewram_to_flash(int flash_type_index);
 
 // 汇编入口函数 - 保存寄存器并调用keypad_process
 asm(
@@ -228,18 +230,13 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
         // 保存原始SRAM到扇区7
         write_sram_to_sector(SRAM_SAVE_SECTOR, flash_type_index);
         
-        // 保存EWRAM (256KB) 到扇区0-3，每个扇区64KB
-        volatile uint8_t *ewram = (volatile uint8_t*)0x02000000;
-        volatile uint8_t *sram = (volatile uint8_t*)0x0E000000;
+        // 保存EWRAM到扇区0-3
+        save_ewram_to_flash(flash_type_index);
         
-        for (int sector = 0; sector < 4; sector++) {
-            // 复制64KB从EWRAM到SRAM（8bit操作）
-            for (uint32_t i = 0; i < SECTOR_SIZE; i++) {
-                sram[i] = ewram[sector * SECTOR_SIZE + i];
-            }
-            // 写入到对应扇区
-            write_sram_to_sector(sector, flash_type_index);
-        }
+        // TODO: 保存其他内存区域
+        
+        // 恢复SRAM为原状
+        restore_sram_from_sector(SRAM_SAVE_SECTOR);
     }
     
     // 恢复sound状态（从EZODE看，先恢复主控制寄存器）
@@ -798,6 +795,24 @@ __attribute__((target("arm"))) void restore_sram_from_sector(int sector_num)
     
     // 复制64KB数据
     copy_flash_to_sram(sector_flash_addr, SECTOR_SIZE);
+}
+
+// 保存EWRAM到Flash扇区0-3
+__attribute__((target("arm"))) void save_ewram_to_flash(int flash_type_index)
+{
+    volatile uint8_t *ewram = (volatile uint8_t*)0x02000000;
+    volatile uint8_t *sram = (volatile uint8_t*)0x0E000000;
+    
+    // EWRAM是256KB，分4个64KB扇区保存
+    for (int sector = 0; sector < 4; sector++) {
+        // 复制64KB从EWRAM到SRAM（8bit操作）
+        int sector_start = sector * SECTOR_SIZE;
+        for (uint32_t i = 0; i < SECTOR_SIZE; i++) {
+            sram[i] = ewram[sector_start + i];
+        }
+        // 写入到对应扇区
+        write_sram_to_sector(EWRAM_START_SECTOR + sector, flash_type_index);
+    }
 }
 
 asm(R"(
