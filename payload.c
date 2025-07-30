@@ -69,6 +69,7 @@ void save_ewram_to_flash(int flash_type_index);
 void save_iwram_palette_to_flash(int flash_type_index);
 void save_vram_front_to_flash(int flash_type_index);
 void save_vram_back_misc_to_flash(int flash_type_index);
+int check_rts_save_flag(void);
 
 // 汇编入口函数 - 保存寄存器并调用keypad_process
 asm(
@@ -304,6 +305,12 @@ __attribute__((target("arm"))) void copy_flash_to_sram(uint32_t flash_addr, uint
 // 读档函数 - 将Flash中的存档恢复到SRAM
 __attribute__((target("arm"))) void load_from_flash(void)
 {
+    // 先检查RTS存档标志
+    if (!check_rts_save_flag()) {
+        // 标志检查失败，直接返回，不启用绿色交换
+        return;
+    }
+    
     // 启用绿色交换 (GREEN_SWAP: 0x04000002)
     volatile uint16_t *green_swap_reg = (volatile uint16_t*)0x04000002;
     *green_swap_reg = 1;
@@ -811,6 +818,40 @@ __attribute__((target("arm"))) void restore_sram_from_sector(int sector_num)
     
     // 复制64KB数据
     copy_flash_to_sram(sector_flash_addr, SECTOR_SIZE);
+}
+
+// 检查RTS存档标志是否有效
+__attribute__((target("arm"))) int check_rts_save_flag(void)
+{
+    // 获取spend_0x80地址
+    uint32_t spend_addr;
+    GET_REL_ADDR(spend_0x80, spend_addr);
+    volatile uint8_t *spend = (volatile uint8_t*)spend_addr;
+    
+    // 计算扇区6的flash地址 + 0xFFF0偏移
+    uint32_t flash_sector_addr;
+    GET_REL_ADDR(flash_save_sector, flash_sector_addr);
+    uint32_t flag_flash_addr = flash_sector_addr + (VRAM_BACK_MISC_SECTOR * SECTOR_SIZE) + 0xFFF0;
+    
+    // 从flash复制16字节标志到spend_0x80
+    volatile uint8_t *flash_flag = (volatile uint8_t*)flag_flash_addr;
+    for (uint32_t i = 0; i < 16; i++) {
+        spend[i] = flash_flag[i];
+    }
+    
+    // 获取RTS标志字符串地址
+    uint32_t expected_flag_addr;
+    GET_REL_ADDR(rts_flag_string, expected_flag_addr);
+    const char *expected_flag = (const char*)expected_flag_addr;
+    
+    // 检查标志是否匹配
+    for (uint32_t i = 0; i < 16; i++) {
+        if (spend[i] != expected_flag[i]) {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 // 保存EWRAM到Flash扇区0-3
