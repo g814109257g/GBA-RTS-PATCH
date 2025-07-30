@@ -5,7 +5,7 @@
 void patched_entrypoint(void);
 
 // Payload头部结构 - 必须在文件最开始,然后必须是强行改为text，否则无法获取相对偏移 
-__attribute__((section(".text"))) const uint32_t original_entrypoint = 0x080000c0;
+__attribute__((section(".text"))) const uint32_t original_entrypoint = 0x080000c0;//游戏原始的入口点地址，有两个用法，一个是取值，那就是能获取游戏入口点。第二个用法则是取地址，这个地址刚好就是payload的头部地址，可以计算函数表的偏移。
 __attribute__((section(".text"))) const uint32_t save_size = 0x20000;//可能会被patcher.c覆盖，目前覆盖值是64KB
 __attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint32_t)patched_entrypoint;
 
@@ -699,18 +699,18 @@ __attribute__((target("arm"))) void erase_all_sectors(int flash_type_index)
     run_thumb_from_ram(flash_sector_addr, erase_size, erase_start, erase_end);
 }
 
-// 写入SRAM到指定的64KB扇区（必须先调用erase_all_sectors）
-__attribute__((target("arm"))) void write_sram_to_sector(int sector_num, int flash_type_index)
-{
-    // 验证扇区号
-    if (sector_num >= TOTAL_SECTORS) {
-        return;
-    }
+uint32_t get_sector_addr(int sector_idx){
     
     // 获取必要的地址
-    uint32_t flash_sector_addr, original_entry_addr;
+    uint32_t flash_sector_addr;
     GET_REL_ADDR(flash_save_sector, flash_sector_addr);
-    uint32_t sector_offset = flash_sector_addr + (sector_num * SECTOR_SIZE) - 0x08000000;
+    uint32_t sector_addr = flash_sector_addr + (sector_idx * SECTOR_SIZE) - 0x08000000;
+    return sector_addr;
+}
+// 写入SRAM到指定的64KB扇区（必须先调用erase_all_sectors）
+__attribute__((target("arm"))) void write_sram_to_sector(int sector_idx, int flash_type_index)
+{
+    uint32_t original_entry_addr;
     GET_REL_ADDR(original_entrypoint, original_entry_addr);
     
     // 获取函数表（使用结构体）
@@ -721,8 +721,9 @@ __attribute__((target("arm"))) void write_sram_to_sector(int sector_num, int fla
     uint32_t program_start = flash_funcs[flash_type_index].program_start + original_entry_addr;
     uint32_t program_end = flash_funcs[flash_type_index].program_end + original_entry_addr;
     
+    uint32_t sector_addr = get_sector_addr(sector_idx);
     // 写入64KB数据
-    run_thumb_from_ram(sector_offset, SECTOR_SIZE, program_start, program_end);
+    run_thumb_from_ram(sector_addr, SECTOR_SIZE, program_start, program_end);
 }
 
 // 从指定扇区恢复SRAM（64KB）
