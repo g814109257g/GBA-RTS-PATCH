@@ -1,4 +1,4 @@
-arm-none-eabi-gcc -mcpu=arm7tdmi -nostartfiles -nodefaultlibs -mthumb -fPIC  -mpic-data-is-text-relative -mno-single-pic-base -Os -fno-toplevel-reorder -Wall -Wextra -Wshadow  payload.c -T payload.ld -o payload.elf
+arm-none-eabi-gcc -mcpu=arm7tdmi -nostartfiles -nodefaultlibs -marm -fPIC  -mpic-data-is-text-relative -mno-single-pic-base -Os -fno-toplevel-reorder -Wall -Wextra -Wshadow  payload.c -T payload.ld -o payload.elf
 
 
 arm-none-eabi-objcopy -O binary payload.elf payload.bin

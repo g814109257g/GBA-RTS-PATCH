@@ -72,7 +72,7 @@ typedef struct {
 // 前向声明  
 void patched_entrypoint(void);
 void rts_save(void);
-int run_thumb_from_ram(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
+int run_arm_from_ram(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
 void keypad_process(void);
 
 // 前向声明函数
@@ -148,6 +148,10 @@ __attribute__((target("arm"))) void keypad_process(void)
         uint16_t sound_reg1 = hw_base[0x0080/2];  // SOUNDCNT_L
         uint16_t sound_reg2 = hw_base[0x0084/2];  // SOUNDCNT_X
         
+        // 保存并禁用IME（中断主使能）- 与EZODE一致
+        uint16_t ime_value = hw_base[0x0208/2];  // 保存IME状态
+        hw_base[0x0208/2] = 0;  // 禁用IME
+        
         // 禁用音频和DMA
         hw_base[0x0084/2] = 0;  // 禁用sound
         hw_base[0x00BA/2] = 0;  // 禁用DMA0
@@ -171,6 +175,9 @@ __attribute__((target("arm"))) void keypad_process(void)
         // 恢复sound状态
         hw_base[0x0084/2] = sound_reg2;
         hw_base[0x0080/2] = sound_reg1;
+        
+        // 恢复IME（中断主使能）- 与EZODE一致
+        hw_base[0x0208/2] = ime_value;
         
         // 等待按键组合松开
         uint16_t wait_keys = need_save ? lr_start : lr_select;
@@ -245,7 +252,7 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
         // 调用identify函数
         uint32_t identify_start = flash_funcs[i].identify_start + original_entry_addr;
         uint32_t identify_end = flash_funcs[i].identify_end + original_entry_addr;
-        identify_result = run_thumb_from_ram(0, 0, identify_start, identify_end);
+        identify_result = run_arm_from_ram(0, 0, identify_start, identify_end);
         
         if (identify_result != 0) {
             // 找到匹配的flash，记录索引
@@ -500,9 +507,9 @@ flash_fn_table:
 
 )");
 
-// 在RAM中运行Thumb函数 - 混合C和汇编实现
+// 在RAM中运行ARM函数 - 混合C和汇编实现
 __attribute__((target("arm"))) 
-int run_thumb_from_ram(uint32_t arg0, uint32_t arg1, uint32_t func_start, uint32_t func_end)
+int run_arm_from_ram(uint32_t arg0, uint32_t arg1, uint32_t func_start, uint32_t func_end)
 {
     int result;
     
@@ -514,7 +521,6 @@ int run_thumb_from_ram(uint32_t arg0, uint32_t arg1, uint32_t func_start, uint32
         "push {r0}\n"          // 保存CPSR到栈,注意，此时已经是系统栈
 
         "mov r4, sp\n"                    // 保存当前栈指针
-        "bic %[start], %[start], #1\n"    // 清除Thumb位，得到实际函数地址
         
         "run_copy_loop:\n"    
         "ldr r5, [%[end], #-4]!\n"        // 从函数末尾向前复制
@@ -522,12 +528,11 @@ int run_thumb_from_ram(uint32_t arg0, uint32_t arg1, uint32_t func_start, uint32
         "cmp %[start], %[end]\n"
         "bne run_copy_loop\n"
         
-        // 设置调用参数和Thumb位
+        // 设置调用参数
         "mov r0, %[arg0]\n"               // 第一个参数
         "mov r1, %[arg1]\n"               // 第二个参数  
-        "add r2, sp, #1\n"                // 栈上函数地址+1(Thumb位)
-        "mov lr, pc\n"                    // 设置返回地址
-        "bx r2\n"                         // 调用Thumb函数
+        "mov lr, pc\n"                    // 设置返回地址（PC+8）
+        "mov pc, sp\n"                    // 调用ARM函数（直接从栈上执行）
         
         "mov %[result], r0\n"             // 保存返回值
         "mov sp, r4\n"                    // 恢复栈指针(清空拷贝过来的函数代码占的空间)
@@ -545,7 +550,7 @@ int run_thumb_from_ram(uint32_t arg0, uint32_t arg1, uint32_t func_start, uint32
 }
 
 
-int __attribute__((target("thumb"), aligned(4))) identify_flash_1()
+int __attribute__((target("arm"))) identify_flash_1()
 {
     unsigned rom_data, data;
 	//stop_dma_interrupts();
@@ -577,10 +582,10 @@ int __attribute__((target("thumb"), aligned(4))) identify_flash_1()
 	}
     return 0;
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "identify_flash_1_end:");
 
-void __attribute__((target("thumb"), aligned(4))) erase_flash_1(unsigned sa, unsigned size)
+void __attribute__((target("arm"))) erase_flash_1(unsigned sa, unsigned size)
 {
     // Erase flash sectors based on size
     // Flash type 1 typically has 64KB sectors
@@ -602,10 +607,10 @@ void __attribute__((target("thumb"), aligned(4))) erase_flash_1(unsigned sa, uns
         _FLASH_WRITE(sa, 0xFF);
     }
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "erase_flash_1_end:");
 
-void __attribute__((target("thumb"), aligned(4))) program_flash_1(unsigned sa, unsigned _save_size)
+void __attribute__((target("arm"))) program_flash_1(unsigned sa, unsigned _save_size)
 {
     // Write data
     SRAM_BANK_SEL = 0;
@@ -624,10 +629,10 @@ void __attribute__((target("thumb"), aligned(4))) program_flash_1(unsigned sa, u
     _FLASH_WRITE(sa, 0xFF);
 }
 
-asm(".align 2\n"
+asm(".align 4\n"
     "program_flash_1_end:");
 
-int __attribute__((target("thumb"), aligned(4))) identify_flash_2()
+int __attribute__((target("arm"))) identify_flash_2()
 {
     unsigned rom_data, data;
 	//stop_dma_interrupts();
@@ -645,10 +650,10 @@ int __attribute__((target("thumb"), aligned(4))) identify_flash_2()
 	}
     return 0;
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "identify_flash_2_end:");
 
-void __attribute__((target("thumb"), aligned(4))) erase_flash_2(unsigned sa, unsigned size)
+void __attribute__((target("arm"))) erase_flash_2(unsigned sa, unsigned size)
 {
     // Erase flash sectors based on size
     // Flash type 2 typically has 64KB sectors
@@ -672,10 +677,10 @@ void __attribute__((target("thumb"), aligned(4))) erase_flash_2(unsigned sa, uns
         _FLASH_WRITE(sa, 0xF0);
     }
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "erase_flash_2_end:");
 
-void __attribute__((target("thumb"), aligned(4))) program_flash_2(unsigned sa, unsigned _save_size)
+void __attribute__((target("arm"))) program_flash_2(unsigned sa, unsigned _save_size)
 {
     // Write data
     SRAM_BANK_SEL = 0;
@@ -695,10 +700,10 @@ void __attribute__((target("thumb"), aligned(4))) program_flash_2(unsigned sa, u
     }
     _FLASH_WRITE(sa, 0xF0);
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "program_flash_2_end:");
 
-int __attribute__((target("thumb"), aligned(4))) identify_flash_3()
+int __attribute__((target("arm"))) identify_flash_3()
 {
     unsigned rom_data, data;
 	//stop_dma_interrupts();
@@ -716,10 +721,10 @@ int __attribute__((target("thumb"), aligned(4))) identify_flash_3()
 	}
     return 0;
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "identify_flash_3_end:");
 
-void __attribute__((target("thumb"), aligned(4))) erase_flash_3(unsigned sa, unsigned size)
+void __attribute__((target("arm"))) erase_flash_3(unsigned sa, unsigned size)
 {
     // Erase flash sectors based on size
     // Flash type 3 typically has 64KB sectors
@@ -743,10 +748,10 @@ void __attribute__((target("thumb"), aligned(4))) erase_flash_3(unsigned sa, uns
         _FLASH_WRITE(sa, 0xF0);
     }
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "erase_flash_3_end:");
 
-void __attribute__((target("thumb"), aligned(4))) program_flash_3(unsigned sa, unsigned _save_size)
+void __attribute__((target("arm"))) program_flash_3(unsigned sa, unsigned _save_size)
 {
     // Write data
     SRAM_BANK_SEL = 0;
@@ -766,10 +771,10 @@ void __attribute__((target("thumb"), aligned(4))) program_flash_3(unsigned sa, u
     }
     _FLASH_WRITE(sa, 0xF0);   
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "program_flash_3_end:");
 
-int __attribute__((target("thumb"), aligned(4))) identify_flash_4()
+int __attribute__((target("arm"))) identify_flash_4()
 {
     unsigned rom_data, data;
 	//stop_dma_interrupts();
@@ -798,10 +803,10 @@ int __attribute__((target("thumb"), aligned(4))) identify_flash_4()
 	}
     return 0;
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "identify_flash_4_end:");
 
-void __attribute__((target("thumb"), aligned(4))) erase_flash_4(unsigned sa, unsigned size)
+void __attribute__((target("arm"))) erase_flash_4(unsigned sa, unsigned size)
 {
     // Erase flash sectors based on size
     // Flash type 4 typically has 64KB sectors
@@ -826,10 +831,10 @@ void __attribute__((target("thumb"), aligned(4))) erase_flash_4(unsigned sa, uns
             __asm("nop");
     }
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "erase_flash_4_end:");
 
-void __attribute__((target("thumb"), aligned(4)))  program_flash_4(unsigned sa, unsigned )
+void __attribute__((target("arm")))  program_flash_4(unsigned sa, unsigned )
 {
     // Write data
     unsigned c = 0;
@@ -863,7 +868,7 @@ void __attribute__((target("thumb"), aligned(4)))  program_flash_4(unsigned sa, 
     for (volatile int i = 0; i < 1024; ++i)
         __asm("nop");
 }
-asm(".align 2\n"
+asm(".align 4\n"
     "program_flash_4_end:");
 
 // 扇区操作封装函数
@@ -886,7 +891,7 @@ __attribute__((target("arm"))) void erase_all_sectors(int flash_type_index)
     
     // 擦除512KB
     const uint32_t erase_size = 0x80000; // 512KB
-    run_thumb_from_ram(flash_sector_addr, erase_size, erase_start, erase_end);
+    run_arm_from_ram(flash_sector_addr, erase_size, erase_start, erase_end);
 }
 
 __attribute__((target("arm"))) uint32_t get_sector_addr(int sector_idx){
@@ -913,7 +918,7 @@ __attribute__((target("arm"))) void write_sram_to_sector(int sector_idx, int fla
     
     uint32_t sector_addr = get_sector_addr(sector_idx);
     // 写入64KB数据
-    run_thumb_from_ram(sector_addr, SECTOR_SIZE, program_start, program_end);
+    run_arm_from_ram(sector_addr, SECTOR_SIZE, program_start, program_end);
 }
 
 // 从指定扇区恢复SRAM（64KB）
