@@ -129,9 +129,6 @@ __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
 // C语言版本的按键中断处理程序  
 __attribute__((target("arm"))) void keypad_process(void)
 {
-    // 修正：原始IRQ处理程序地址应该是0x03FFFFF4 (0x04000000-12)
-    volatile uint32_t *original_irq_handler = (volatile uint32_t*)0x03FFFFF4;
-    
     // 检查按键寄存器 (KEYINPUT: 0x04000130)
     volatile uint16_t *keypad_reg = (volatile uint16_t*)0x04000130;
     uint16_t keypad_value = *keypad_reg;
@@ -205,9 +202,11 @@ __attribute__((target("arm"))) void keypad_process(void)
         }
     }
     
+    // 修正：原始IRQ处理程序地址应该是0x03FFFFF4 (0x04000000-12)
+    volatile uint32_t *original_irq_handler = (volatile uint32_t*)0x03FFFFF4;
     // 跳转到原始中断处理程序
-    void (*original_handler)(void) = (void (*)(void))(*original_irq_handler);
-    original_handler();
+    void (*original_handler)(uint32_t) = (void (*)(uint32_t))(*original_irq_handler);
+    original_handler(0x40000000);  // 传递IRQ寄存器地址 (0x04000000)
 }
 
 
