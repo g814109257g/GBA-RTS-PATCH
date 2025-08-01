@@ -484,49 +484,7 @@ __attribute__((target("arm"))) void load_from_flash(void)
 }
     
 asm(R"(
-# Flash到SRAM的复制函数 - 必须在RAM中执行以访问SRAM
-# r0 = flash源地址, r1 = 大小 (64KB)
-    .arm
-    .align
-flash_copy_to_sram_fn_start:
-    push {r4-r8,lr}
-    
-    # 设置目标地址为SRAM (0x0E000000)
-    mov r2, #0x0E000000
-    
-    # 设置bank寄存器地址
-    mov r3, #0x09000000
-    mov r4, #0          @ 初始bank为0
-    strh r4, [r3]
-    
-    # 复制循环
-copy_loop:
-    # 检查是否需要切换bank (基于目标地址的bit 16)
-    mov r5, r2, lsr #16
-    and r5, r5, #1
-    cmp r5, r4
-    beq no_bank_switch
-    
-    # 切换bank
-    mov r4, r5
-    strh r4, [r3]
-    
-no_bank_switch:
-    # 从Flash读取32位
-    ldr r6, [r0], #4
-    # 写入SRAM
-    str r6, [r2], #4
-    # 减少计数
-    subs r1, r1, #4
-    bne copy_loop
-    
-    # 设置bank回0
-    mov r4, #0
-    strh r4, [r3]
-    
-    pop {r4-r8,pc}
-flash_copy_to_sram_fn_end:
-
+.align 4
 # Flash函数表 - 对应C结构体 flash_fn_table_c[]
 flash_fn_table:
 # Flash type 1 - flash_functions_t[0]
