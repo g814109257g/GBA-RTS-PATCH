@@ -17,9 +17,13 @@ __attribute__((section(".text"))) const struct PayloadHeader payload_header = {
     .patched_entrypoint_addr = (uint32_t)patched_entrypoint
 };
 
+#define LOAD_KEYS 0x308  
+// L+R+START (存档)
+#define SAVE_KEYS 0x304  
+// L+R+SELECT (读档)
 
-__attribute__((section(".text"))) const uint32_t lr_start_key = 0x308;   // L+R+START (存档)
-__attribute__((section(".text"))) const uint32_t lr_select_key = 0x304;  // L+R+SELECT (读档)
+// __attribute__((section(".text"))) const uint32_t lr_start_key = 0x308;   // L+R+START (存档)
+// __attribute__((section(".text"))) const uint32_t lr_select_key = 0x304;  // L+R+SELECT (读档)
 // RTS存档标志字符串 - 必须放在.text段
 __attribute__((section(".text"))) const char rts_flag_string[] = "Ausar'S-RTSFILE.";
 
@@ -261,34 +265,15 @@ __attribute__((naked, target("arm"))) void patched_entrypoint(void)
 __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
 {
     asm volatile(
-        // // r0 = 0x04000000 (GBA的IRQ handler会预设这个值)
-        // "ldr r1, [r0, #0x200]\n"          // 读取IE/IF寄存器
-        // "tst r1, #0x10000\n"              // 检查IF的bit16
-        // "tsteq r1, #0x10000000\n"         // 检查IE的bit28
-        // "ldreq pc, [r0, #-0xC]\n"         // 如果都不是，跳到原始中断处理程序
-        
-        // 读取按键状态
-        // "add r1, r0, #0x130\n"            // r5 = 0x04000130 (KEYINPUT地址)
-        // "ldrh r2, [r1]\n"                 // 读取按键值（16位）
-        
-        // // 检查是否是存档热键 (L+R+START)
-        // "ldr r3, lr_start_key\n"         // 获取存档热键地址
-        // // "ldr r3, [r3]\n"                  // 加载存档热键值
-        // "and r4, r2, r3\n"                // AND运算
-        // "cmp r4, #0\n"                    // 检查是否为0
-        // "beq call_handler\n"              // 如果为0，说明按键被按下
-        
-        // // 检查是否是读档热键 (L+R+SELECT)
-        // "ldr r3, lr_select_key\n"        // 获取读档热键地址
-        // // "ldr r3, [r3]\n"                  // 加载读档热键值
-        // "and r4, r2, r3\n"                // AND运算
-        // "cmp r4, #0\n"                    // 检查是否为0
-        // "beq call_handler\n"              // 如果为0，说明按键被按下
-        
-        // // 都不匹配，跳到原始中断处理程序
-        // "ldr pc, [r0, #-0xC]\n"           // 跳转到原始IRQ处理程序
-        
+
         //不知道为什么，有上面的判断反而会卡。不如就直接无脑存
+        "push {r0,lr}\n"
+        "bl detect_keys\n"        // 检测按键
+        "cmp r0, #1\n"
+        "pop {r0,lr}\n"         //r0比较完成之后，就可以恢复最初的0x04000000了
+        "beq call_handler\n"
+        "ldr pc, [r0, #-(0x04000000-0x03FFFFF4)]\n" // 跳转到原始IRQ处理程序
+
         "call_handler:\n"
         // 匹配了其中一个热键，保存寄存器并调用处理函数
         "mrs r3, SPSR\n"                 // 先读取SPSR到r3
@@ -304,26 +289,27 @@ __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
 0x04-0x23 (32字节): IRQ模式下的r4-r11寄存器
 0x24-0x27 (4字节): IRQ模式下的sp寄存器
 0x28-0x2B (4字节): IRQ模式下的lr寄存器*/
+__attribute__((target("arm"))) int detect_keys(void)
+{
+    uint16_t keypad_value = *((volatile uint16_t*)0x04000130);
+    if ((keypad_value & LOAD_KEYS) == 0 || (keypad_value & SAVE_KEYS) == 0) {
+        // 检测到L+R+START或L+R+SELECT按键组合
+        return 1;
+    } else {
+        return 0;
+    }
+}
 
 // C语言版本的按键中断处理程序  
 __attribute__((target("arm"))) void keypad_process(void)
 {
     // 检查按键寄存器 (KEYINPUT: 0x04000130)
     volatile uint16_t *keypad_reg = (volatile uint16_t*)0x04000130;
-    uint16_t keypad_value = *keypad_reg;
-    
-    // 按键组合定义 (GBA按键反相: 按下=0, 未按下=1)
-    // L=0x200, R=0x100, START=0x08, SELECT=0x04
-    uint16_t lr_start = 0x308;   // L+R+START (存档)
-    uint16_t lr_select = 0x304;  // L+R+SELECT (读档)
-    // uint32_t lr_start;   // L+R+START (存档)
-    // uint32_t lr_select;  // L+R+SELECT (读档)
-    // GET_REL_VALUE(lr_start_key, lr_start);
-    // GET_REL_VALUE(lr_select_key, lr_select);
+    uint16_t keypad_value = (*keypad_reg);
 
     // 检查是否按下L+R+START (存档)
-    bool need_save = (keypad_value & lr_start) == 0;
-    bool need_load = (keypad_value & lr_select) == 0;
+    bool need_save = (keypad_value & LOAD_KEYS) == 0;
+    bool need_load = (keypad_value & SAVE_KEYS) == 0;
     if (need_save || need_load) {
         // 硬件寄存器基地址
         volatile uint16_t *hw_base = (volatile uint16_t*)0x04000000;
@@ -379,7 +365,7 @@ __attribute__((target("arm"))) void keypad_process(void)
         hw_base[0x0208/2] = ime_value;
         
         // 等待按键组合松开
-        uint16_t wait_keys = need_save ? lr_start : lr_select;
+        uint16_t wait_keys = need_save ? LOAD_KEYS : SAVE_KEYS;
         while (((*keypad_reg) & wait_keys) == 0) {
             // 空循环等待
         }
