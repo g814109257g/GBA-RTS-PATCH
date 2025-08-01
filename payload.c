@@ -292,13 +292,10 @@ __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
         "call_handler:\n"
         // 匹配了其中一个热键，保存寄存器并调用处理函数
         "mrs r3, SPSR\n"                 // 先读取SPSR到r3
-        "adrl r12, spend_0x80\n"
-        "ldr r12, [r12]\n"
+        "ldr r12, spend_0x80\n"
         "stmia r12!, {r3-r11,sp,lr}\n"   // 一次性保存r3(SPSR)到lr
         "\n"
-        "push {r0,lr}\n"                  // 保存r0(0x04000000)和lr
-        "bl keypad_process\n"
-        "pop {r0,pc}\n"                   // 恢复r0并返回
+        "b keypad_process\n"
     );
 }
 /*此时临时缓冲区内容:（优化后的布局）
