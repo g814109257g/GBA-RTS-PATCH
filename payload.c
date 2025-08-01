@@ -17,6 +17,9 @@ __attribute__((section(".text"))) const struct PayloadHeader payload_header = {
     .patched_entrypoint_addr = (uint32_t)patched_entrypoint
 };
 
+
+__attribute__((section(".text"))) const uint32_t lr_start_key = 0x308;   // L+R+START (存档)
+__attribute__((section(".text"))) const uint32_t lr_select_key = 0x304;  // L+R+SELECT (读档)
 // RTS存档标志字符串 - 必须放在.text段
 __attribute__((section(".text"))) const char rts_flag_string[] = "Ausar'S-RTSFILE.";
 
@@ -106,19 +109,48 @@ __attribute__((naked, target("arm"))) void patched_entrypoint(void)
     );
 }
 
-// 裸汇编中断处理函数 - 保存寄存器并调用keypad_process
+// 裸汇编中断处理函数 - 参考EZODE的RTS_irq实现
 __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
 {
     asm volatile(
+        // r0 = 0x04000000 (GBA的IRQ handler会预设这个值)
+        "ldr r1, [r0, #0x200]\n"          // 读取IE/IF寄存器
+        "tst r1, #0x10000\n"              // 检查IF的bit16
+        "tsteq r1, #0x10000000\n"         // 检查IE的bit28
+        "ldreq pc, [r0, #-0xC]\n"         // 如果都不是，跳到原始中断处理程序
+        
+        // 读取按键状态
+        "add r1, r0, #0x130\n"            // r5 = 0x04000130 (KEYINPUT地址)
+        "ldrh r2, [r1]\n"                 // 读取按键值（16位）
+        
+        // 检查是否是存档热键 (L+R+START)
+        "adrl r3, lr_start_key\n"         // 获取存档热键地址
+        "ldr r3, [r3]\n"                  // 加载存档热键值
+        "and r4, r2, r3\n"                // AND运算
+        "cmp r4, #0\n"                    // 检查是否为0
+        "beq call_handler\n"              // 如果为0，说明按键被按下
+        
+        // 检查是否是读档热键 (L+R+SELECT)
+        "adrl r3, lr_select_key\n"        // 获取读档热键地址
+        "ldr r3, [r3]\n"                  // 加载读档热键值
+        "and r4, r2, r3\n"                // AND运算
+        "cmp r4, #0\n"                    // 检查是否为0
+        "beq call_handler\n"              // 如果为0，说明按键被按下
+        
+        // 都不匹配，跳到原始中断处理程序
+        "ldr pc, [r0, #-0xC]\n"           // 跳转到原始IRQ处理程序
+        
+        "call_handler:\n"
+        // 匹配了其中一个热键，保存寄存器并调用处理函数
         "adrl r12, spend_0x80\n"
         "ldr r12, [r12]\n"
         "stmia r12!, {r4-r11,sp,lr}\n"
-        "mrs r2, SPSR\n"
-        "stmia r12!, {r2}\n"
+        "mrs r3, SPSR\n"
+        "stmia r12!, {r3}\n"
         "\n"
-        "push {lr}\n"
+        "push {r0,lr}\n"                  // 保存r0(0x04000000)和lr
         "bl keypad_process\n"
-        "pop {pc}\n"
+        "pop {r0,pc}\n"                   // 恢复r0并返回
     );
 }
 /*此时临时缓冲区内容:（与EZODE完全一致）
@@ -135,9 +167,13 @@ __attribute__((target("arm"))) void keypad_process(void)
     
     // 按键组合定义 (GBA按键反相: 按下=0, 未按下=1)
     // L=0x200, R=0x100, START=0x08, SELECT=0x04
-    uint16_t lr_start = 0x308;   // L+R+START (存档)
-    uint16_t lr_select = 0x304;  // L+R+SELECT (读档)
-    
+    // uint16_t lr_start = 0x308;   // L+R+START (存档)
+    // uint16_t lr_select = 0x304;  // L+R+SELECT (读档)
+    uint32_t lr_start;   // L+R+START (存档)
+    uint32_t lr_select;  // L+R+SELECT (读档)
+    GET_REL_VALUE(lr_start_key, lr_start);
+    GET_REL_VALUE(lr_select_key, lr_select);
+
     // 检查是否按下L+R+START (存档)
     bool need_save = (keypad_value & lr_start) == 0;
     bool need_load = (keypad_value & lr_select) == 0;
