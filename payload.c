@@ -25,17 +25,146 @@ __attribute__((section(".text"))) const char rts_flag_string[] = "Ausar'S-RTSFIL
 
 // IO寄存器恢复列表 - 必须放在.text段（与EZODE一致）
 __attribute__((section(".text"), aligned(2))) const uint16_t io_register_list[] = {
-    0x0000, 0x0002, 0x0004, 0x0008, 0x000A, 0x000C, 0x000E, 0x0048,
-    0x004A, 0x0050, 0x0052,
-    0x0084,
-    0x0060, 0x0062, 0x0068, 0x0070, 0x0072, 0x0078,
-    0x0080, 0x0082, 0x0088,                         // 0x008C, 0x008E,
-    0x0090, 0x0092, 0x0094, 0x0096, 0x0098, 0x009A, 0x009C, 0x009E,
-    0x00B8, 0x00C4, 0x00D0, 0x00DC,  // DMA
-    0x0120, 0x0122, 0x0124, 0x0126, 0x0128, 0x012A, 0x012C, 0x0132, 0x0134,
-    0x0140, 0x0150, 0x0154, 0x0200, 0x0204, 0x0208,
-    0xFF00  // 结束标记
+    // LCD控制寄存器
+    0x0000,  // DISPCNT   - LCD Control
+    0x0002,  // Green Swap - Undocumented
+    0x0004,  // DISPSTAT  - General LCD Status
+    0x0008,  // BG0CNT    - BG0 Control
+    0x000A,  // BG1CNT    - BG1 Control
+    0x000C,  // BG2CNT    - BG2 Control
+    0x000E,  // BG3CNT    - BG3 Control
+    
+    // 窗口控制
+    0x0048,  // WININ     - Inside of Window 0 and 1
+    0x004A,  // WINOUT    - Inside of OBJ Window & Outside
+    
+    // 特效控制
+    0x0050,  // BLDCNT    - Color Special Effects Selection
+    0x0052,  // BLDALPHA  - Alpha Blending Coefficients
+    
+    // 音频寄存器
+    0x0084,  // SOUNDCNT_X - Control Sound on/off (NR52)
+    0x0060,  // SOUND1CNT_L - Channel 1 Sweep register
+    0x0062,  // SOUND1CNT_H - Channel 1 Duty/Length/Envelope
+    0x0068,  // SOUND2CNT_L - Channel 2 Duty/Length/Envelope
+    0x0070,  // SOUND3CNT_L - Channel 3 Stop/Wave RAM select
+    0x0072,  // SOUND3CNT_H - Channel 3 Length/Volume
+    0x0078,  // SOUND4CNT_L - Channel 4 Length/Envelope
+    0x0080,  // SOUNDCNT_L  - Control Stereo/Volume/Enable
+    0x0082,  // SOUNDCNT_H  - Control Mixing/DMA Control
+    0x0088,  // SOUNDBIAS   - Sound PWM Control
+    
+    // Wave RAM
+    0x0090, 0x0092, 0x0094, 0x0096,  // WAVE_RAM bank 0
+    0x0098, 0x009A, 0x009C, 0x009E,  // WAVE_RAM bank 1
+    
+    // DMA控制寄存器
+    0x00B8,  // DMA0CNT_L - DMA 0 Word Count
+    0x00C4,  // DMA1CNT_L - DMA 1 Word Count
+    0x00D0,  // DMA2CNT_L - DMA 2 Word Count
+    0x00DC,  // DMA3CNT_L - DMA 3 Word Count
+    
+    // 串行通信
+    0x0120,  // SIODATA32/SIOMULTI0 - SIO Data
+    0x0122,  // SIOMULTI1 - SIO Data 1
+    0x0124,  // SIOMULTI2 - SIO Data 2
+    0x0126,  // SIOMULTI3 - SIO Data 3
+    0x0128,  // SIOCNT    - SIO Control Register
+    0x012A,  // SIOMLT_SEND/SIODATA8 - SIO Data
+    0x012C,  // 未使用，但包含在列表中
+    0x0132,  // KEYCNT    - Key Interrupt Control
+    0x0134,  // RCNT      - SIO Mode Select
+    
+    // JOY总线
+    0x0140,  // JOYCNT    - SIO JOY Bus Control
+    0x0150,  // JOY_RECV  - SIO JOY Bus Receive Data
+    0x0154,  // JOY_TRANS - SIO JOY Bus Transmit Data
+    
+    // 中断和电源控制
+    0x0200,  // IE        - Interrupt Enable Register
+    0x0204,  // WAITCNT   - Game Pak Waitstate Control
+    0x0208,  // IME       - Interrupt Master Enable Register
+    
+    0xFF00   // 结束标记
 };
+
+/* 未包含在恢复列表中的IO寄存器：
+ * 
+ * LCD寄存器：
+ * 0x0006  VCOUNT    - Vertical Counter (只读，不需要恢复)
+ * 0x0010  BG0HOFS   - BG0 X-Offset
+ * 0x0012  BG0VOFS   - BG0 Y-Offset
+ * 0x0014  BG1HOFS   - BG1 X-Offset
+ * 0x0016  BG1VOFS   - BG1 Y-Offset
+ * 0x0018  BG2HOFS   - BG2 X-Offset
+ * 0x001A  BG2VOFS   - BG2 Y-Offset
+ * 0x001C  BG3HOFS   - BG3 X-Offset
+ * 0x001E  BG3VOFS   - BG3 Y-Offset
+ * 0x0020  BG2PA     - BG2 Rotation/Scaling Parameter A
+ * 0x0022  BG2PB     - BG2 Rotation/Scaling Parameter B
+ * 0x0024  BG2PC     - BG2 Rotation/Scaling Parameter C
+ * 0x0026  BG2PD     - BG2 Rotation/Scaling Parameter D
+ * 0x0028  BG2X      - BG2 Reference Point X-Coordinate (4字节)
+ * 0x002C  BG2Y      - BG2 Reference Point Y-Coordinate (4字节)
+ * 0x0030  BG3PA     - BG3 Rotation/Scaling Parameter A
+ * 0x0032  BG3PB     - BG3 Rotation/Scaling Parameter B
+ * 0x0034  BG3PC     - BG3 Rotation/Scaling Parameter C
+ * 0x0036  BG3PD     - BG3 Rotation/Scaling Parameter D
+ * 0x0038  BG3X      - BG3 Reference Point X-Coordinate (4字节)
+ * 0x003C  BG3Y      - BG3 Reference Point Y-Coordinate (4字节)
+ * 0x0040  WIN0H     - Window 0 Horizontal Dimensions
+ * 0x0042  WIN1H     - Window 1 Horizontal Dimensions
+ * 0x0044  WIN0V     - Window 0 Vertical Dimensions
+ * 0x0046  WIN1V     - Window 1 Vertical Dimensions
+ * 0x004C  MOSAIC    - Mosaic Size
+ * 0x0054  BLDY      - Brightness (Fade-In/Out) Coefficient
+ * 
+ * 音频寄存器：
+ * 0x0064  SOUND1CNT_X - Channel 1 Frequency/Control
+ * 0x006C  SOUND2CNT_H - Channel 2 Frequency/Control
+ * 0x0074  SOUND3CNT_X - Channel 3 Frequency/Control
+ * 0x007C  SOUND4CNT_H - Channel 4 Frequency/Control
+ * 0x00A0  FIFO_A    - Channel A FIFO, Data 0-3 (只写)
+ * 0x00A4  FIFO_B    - Channel B FIFO, Data 0-3 (只写)
+ * 
+ * DMA寄存器：
+ * 0x00B0  DMA0SAD   - DMA 0 Source Address (4字节)
+ * 0x00B4  DMA0DAD   - DMA 0 Destination Address (4字节)
+ * 0x00BA  DMA0CNT_H - DMA 0 Control (在keypad_process中单独保存)
+ * 0x00BC  DMA1SAD   - DMA 1 Source Address (4字节)
+ * 0x00C0  DMA1DAD   - DMA 1 Destination Address (4字节)
+ * 0x00C6  DMA1CNT_H - DMA 1 Control (在keypad_process中单独保存)
+ * 0x00C8  DMA2SAD   - DMA 2 Source Address (4字节)
+ * 0x00CC  DMA2DAD   - DMA 2 Destination Address (4字节)
+ * 0x00D2  DMA2CNT_H - DMA 2 Control (在keypad_process中单独保存)
+ * 0x00D4  DMA3SAD   - DMA 3 Source Address (4字节)
+ * 0x00D8  DMA3DAD   - DMA 3 Destination Address (4字节)
+ * 0x00DE  DMA3CNT_H - DMA 3 Control (在keypad_process中单独保存)
+ * 
+ * 定时器寄存器：
+ * 0x0100  TM0CNT_L  - Timer 0 Counter/Reload
+ * 0x0102  TM0CNT_H  - Timer 0 Control
+ * 0x0104  TM1CNT_L  - Timer 1 Counter/Reload
+ * 0x0106  TM1CNT_H  - Timer 1 Control
+ * 0x0108  TM2CNT_L  - Timer 2 Counter/Reload
+ * 0x010A  TM2CNT_H  - Timer 2 Control
+ * 0x010C  TM3CNT_L  - Timer 3 Counter/Reload
+ * 0x010E  TM3CNT_H  - Timer 3 Control
+ * 
+ * 按键输入：
+ * 0x0130  KEYINPUT  - Key Status (只读)
+ * 
+ * 串行通信（部分）：
+ * 0x0136  IR        - Infrared Register (仅原型机)
+ * 0x0158  JOYSTAT   - SIO JOY Bus Receive Status (只读)
+ * 
+ * 中断和电源：
+ * 0x0202  IF        - Interrupt Request Flags (在恢复时清零)
+ * 0x0300  POSTFLG   - Post Boot Flag
+ * 0x0301  HALTCNT   - Power Down Control (只写)
+ * 0x0410  未知      - Undocumented
+ * 0x0800  内部内存控制
+ */
 
 //默认临时存储地址 (EWRAM区域)
 //0203FFFF - 0203FE00 = 0x1FF, 512字节的空闲区域，这是认为，至少，EWRAM会有这么多的可用空间
