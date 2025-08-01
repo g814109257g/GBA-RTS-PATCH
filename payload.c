@@ -78,6 +78,7 @@ typedef struct {
 
 // 前向声明  
 void patched_entrypoint(void);
+uint32_t init_before_game(void);
 void rts_save(void);
 int run_arm_from_ram(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
 void keypad_process(void);
@@ -199,8 +200,8 @@ __attribute__((target("arm"))) void keypad_process(void)
 }
 
 
-// C语言版本的补丁入口点（位置无关代码）
-__attribute__((target("arm"))) void patched_entrypoint(void)
+// C语言版本的游戏初始化函数（位置无关代码）
+__attribute__((target("arm"))) uint32_t init_before_game(void)
 {
     // 使用宏获取相对地址，避免GOT依赖
     uint32_t irq_handler_addr;
@@ -219,12 +220,18 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
     // 从默认扇区恢复SRAM 如果是需要免电池存档那就需要
     // restore_sram_from_sector(SRAM_SAVE_SECTOR);
     
-    // 跳转到原始入口点
+    // 返回原始入口点地址
+    return header->original_entrypoint;
+}
+
+// 裸汇编入口函数 - 调用init_before_game然后跳转到原始入口点
+__attribute__((naked, target("arm"))) void patched_entrypoint(void)
+{
     asm volatile(
-        "mov pc, %0\n"
-        :
-        : "r"(header->original_entrypoint)
-        : "memory"
+        "push {lr}\n"
+        "bl init_before_game\n"          // 调用初始化函数
+        "pop {lr}\n"
+        "mov pc, r0\n"                   // 跳转到init函数告诉的原始入口点地址
     );
 }
 
