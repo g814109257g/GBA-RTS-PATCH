@@ -12,9 +12,11 @@
 
 FILE *romfile;
 FILE *outfile;
+FILE *rtsfile;
 uint32_t romsize;
 uint8_t rom[0x02000000];
 char signature[] = "<3 from Maniac";
+#define RTS_SIZE (448 * 1024)  // 448KB
 
 enum payload_offsets {
     ORIGINAL_ENTRYPOINT_ADDR,
@@ -37,10 +39,12 @@ static uint8_t *memfind(uint8_t *haystack, size_t haystack_size, uint8_t *needle
 
 int main(int argc, char **argv)
 {
-    // 检查参数数量，必须为2（程序名+ROM文件名）
-    if (argc != 2)
+    // 检查参数数量，必须为2或3（程序名+ROM文件名+可选的RTS文件）
+    if (argc != 2 && argc != 3)
     {
-        puts("Wrong number of args. Try dragging and dropping your ROM onto the .exe file in the file browser.");
+        puts("Usage: patcher <rom.gba> [save.rts]");
+        puts("       rom.gba  - GBA ROM file to patch");
+        puts("       save.rts - Optional 448KB RTS save file to embed");
         scanf("%*s");
         return 1;
     }
@@ -178,6 +182,53 @@ int main(int argc, char **argv)
     printf("SRAM save space ROM address: 0x%08X\n", 0x08000000 + sram_save_base);
     printf("Reserved space size: %u KB (0x%X bytes)\n", reserved_space / 1024, reserved_space);
     printf("Actual SRAM copy size: 64 KB (0x10000 bytes)\n");
+    
+    // 处理可选的RTS文件
+    if (argc == 3)
+    {
+        // 检查RTS文件扩展名
+        size_t rtsfilename_len = strlen(argv[2]);
+        if (rtsfilename_len < 4 || strcasecmp(argv[2] + rtsfilename_len - 4, ".rts"))
+        {
+            puts("Second file does not have .rts extension.");
+            scanf("%*s");
+            return 1;
+        }
+        
+        // 打开RTS文件
+        if (!(rtsfile = fopen(argv[2], "rb")))
+        {
+            puts("Could not open RTS file");
+            puts(strerror(errno));
+            scanf("%*s");
+            return 1;
+        }
+        
+        // 检查文件大小必须是448KB
+        fseek(rtsfile, 0, SEEK_END);
+        long rtssize = ftell(rtsfile);
+        if (rtssize != RTS_SIZE)
+        {
+            printf("RTS file size must be exactly 448KB (458752 bytes), but got %ld bytes\n", rtssize);
+            fclose(rtsfile);
+            scanf("%*s");
+            return 1;
+        }
+        
+        // 读取RTS文件内容到ROM的存档位置
+        fseek(rtsfile, 0, SEEK_SET);
+        if (fread(rom + sram_save_base, 1, RTS_SIZE, rtsfile) != RTS_SIZE)
+        {
+            puts("Failed to read RTS file");
+            fclose(rtsfile);
+            scanf("%*s");
+            return 1;
+        }
+        fclose(rtsfile);
+        
+        printf("RTS file embedded successfully at offset 0x%X\n", sram_save_base);
+        printf("RTS covers sectors 0-6 (448KB) of the 512KB save space\n");
+    }
 
     // 修改ROM入口点，使其跳转到payload中的patched_entrypoint
     // 并将原入口点地址写入payload的original_entrypoint字段（payload.c头部）
