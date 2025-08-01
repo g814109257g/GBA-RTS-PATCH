@@ -4,10 +4,18 @@
 
 // 前向声明
 void patched_entrypoint(void);
+struct PayloadHeader{
+    uint32_t original_entrypoint; // 游戏原始入口点地址
+    uint32_t save_size;           // 存档大小
+    uint32_t patched_entrypoint_addr; // 补丁入口点地址
+};
 
 // Payload头部结构 - 必须在文件最开始,然后必须是强行改为text，否则无法获取相对偏移 
-__attribute__((section(".text"))) const uint32_t original_entrypoint = 0x080000c0;//游戏原始的入口点地址，有两个用法，一个是取值，那就是能获取游戏入口点。第二个用法则是取地址，这个地址刚好就是payload的头部地址，可以计算函数表的偏移。
-__attribute__((section(".text"))) const uint32_t save_size = 0x20000;//可能会被patcher.c覆盖，目前覆盖值是64KB
+__attribute__((section(".text"))) const struct PayloadHeader payload_header = {
+    .original_entrypoint = 0x080000c0,
+    .save_size = 0x20000,
+    .patched_entrypoint_addr = (uint32_t)patched_entrypoint
+};
 __attribute__((section(".text"))) const uint32_t patched_entrypoint_addr = (uint32_t)patched_entrypoint;
 
 // RTS存档标志字符串 - 必须放在.text段
@@ -195,13 +203,12 @@ __attribute__((target("arm"))) void keypad_process(void)
 // C语言版本的补丁入口点（位置无关代码）
 __attribute__((target("arm"))) void patched_entrypoint(void)
 {
-    uint32_t irq_handler_addr, flash_src_addr, save_size_value, original_entry_addr;
-    
     // 使用宏获取相对地址，避免GOT依赖
+    uint32_t irq_handler_addr;
     GET_REL_ADDR(keypad_irq_handler, irq_handler_addr);
-    GET_REL_ADDR(flash_save_sector, flash_src_addr);
-    GET_REL_VALUE(save_size, save_size_value);
-    GET_REL_VALUE(original_entrypoint, original_entry_addr);
+
+    struct PayloadHeader *header = (struct PayloadHeader*)&payload_header;
+    GET_REL_ADDR(payload_header, header);
     
     // 设置按键中断处理程序到 [0x04000000-4] = 0x03FFFFFC
     volatile uint32_t *irq_vector = (volatile uint32_t*)0x03FFFFFC;
@@ -217,7 +224,7 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
     asm volatile(
         "mov pc, %0\n"
         :
-        : "r"(original_entry_addr)
+        : "r"(header->original_entrypoint)
         : "memory"
     );
 }
@@ -229,11 +236,12 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
     *green_swap_reg = 1;
     
     // 用C代码获取地址和值，避免GOT依赖
-    uint32_t flash_sector_addr, save_size_value, original_entry_addr;
+    uint32_t flash_sector_addr;
     GET_REL_ADDR(flash_save_sector, flash_sector_addr);
     flash_sector_addr -= 0x08000000;  // 转换为flash内偏移
-    GET_REL_VALUE(save_size, save_size_value);
-    GET_REL_ADDR(original_entrypoint, original_entry_addr);
+
+    struct PayloadHeader *header;
+    GET_REL_ADDR(payload_header, header);
     
     // 第一部分：try_flash循环检测（使用结构体）
     int flash_type_index = -1;
@@ -250,8 +258,8 @@ __attribute__((target("arm"))) void patched_entrypoint(void)
         }
         
         // 调用identify函数
-        uint32_t identify_start = flash_funcs[i].identify_start + original_entry_addr;
-        uint32_t identify_end = flash_funcs[i].identify_end + original_entry_addr;
+        uint32_t identify_start = flash_funcs[i].identify_start + (uint32_t)header;
+        uint32_t identify_end = flash_funcs[i].identify_end + (uint32_t)header;
         identify_result = run_arm_from_ram(0, 0, identify_start, identify_end);
         
         if (identify_result != 0) {
@@ -847,7 +855,7 @@ void __attribute__((target("arm"))) erase_flash_4(unsigned sa, unsigned size)
 asm(".align 4\n"
     "erase_flash_4_end:");
 
-void __attribute__((target("arm")))  program_flash_4(unsigned sa, unsigned )
+void __attribute__((target("arm")))  program_flash_4(unsigned sa, unsigned save_size)
 {
     // Write data
     unsigned c = 0;
@@ -889,19 +897,19 @@ asm(".align 4\n"
 __attribute__((target("arm"))) void erase_all_sectors(int flash_type_index)
 {
     // 获取必要的地址
-    uint32_t flash_sector_addr, original_entry_addr;
+    uint32_t flash_sector_addr, payload_header_addr;
     GET_REL_ADDR(flash_save_sector, flash_sector_addr);
     flash_sector_addr -= 0x08000000;  // 转换为flash内偏移
-    GET_REL_ADDR(original_entrypoint, original_entry_addr);
-    
+    GET_REL_ADDR(payload_header, payload_header_addr);
+
     // 获取函数表（使用结构体）
     flash_functions_t *flash_funcs;
     GET_REL_ADDR(flash_fn_table, flash_funcs);
     
     // 获取erase函数地址
-    uint32_t erase_start = flash_funcs[flash_type_index].erase_start + original_entry_addr;
-    uint32_t erase_end = flash_funcs[flash_type_index].erase_end + original_entry_addr;
-    
+    uint32_t erase_start = flash_funcs[flash_type_index].erase_start + payload_header_addr;
+    uint32_t erase_end = flash_funcs[flash_type_index].erase_end + payload_header_addr;
+
     // 擦除512KB
     const uint32_t erase_size = 0x80000; // 512KB
     run_arm_from_ram(flash_sector_addr, erase_size, erase_start, erase_end);
@@ -918,17 +926,17 @@ __attribute__((target("arm"))) uint32_t get_sector_addr(int sector_idx){
 // 写入SRAM到指定的64KB扇区（必须先调用erase_all_sectors）
 __attribute__((target("arm"))) void write_sram_to_sector(int sector_idx, int flash_type_index)
 {
-    uint32_t original_entry_addr;
-    GET_REL_ADDR(original_entrypoint, original_entry_addr);
-    
+    uint32_t payload_header_addr;
+    GET_REL_ADDR(payload_header, payload_header_addr);
+
     // 获取函数表（使用结构体）
     flash_functions_t *flash_funcs;
     GET_REL_ADDR(flash_fn_table, flash_funcs);
     
     // 获取program函数地址
-    uint32_t program_start = flash_funcs[flash_type_index].program_start + original_entry_addr;
-    uint32_t program_end = flash_funcs[flash_type_index].program_end + original_entry_addr;
-    
+    uint32_t program_start = flash_funcs[flash_type_index].program_start + payload_header_addr;
+    uint32_t program_end = flash_funcs[flash_type_index].program_end + payload_header_addr;
+
     uint32_t sector_addr = get_sector_addr(sector_idx);
     // 写入64KB数据
     run_arm_from_ram(sector_addr, SECTOR_SIZE, program_start, program_end);
