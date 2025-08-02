@@ -522,15 +522,14 @@ __attribute__((target("arm"))) void load_from_flash(void)
         }
     }
     
-    // 恢复IWRAM和调色板 - 从扇区4
+    // 恢复IWRAM和VRAM后半部分 - 从扇区4
     volatile uint32_t *flash_sector4 = (volatile uint32_t*)(flash_base_addr + IWRAM_PALETTE_SECTOR * SECTOR_SIZE);
     
-    
-    // 恢复调色板 (1KB) - 使用u32拷贝
-    volatile uint32_t *palette = (volatile uint32_t*)0x05000000;
-    volatile uint32_t *flash_palette = flash_sector4 + (0x8000 / 4);
-    for (uint32_t i = 0; i < 0x400 / 4; i++) {
-        palette[i] = flash_palette[i];
+    // IWRAM已经在ASM中恢复了，这里恢复VRAM后32KB
+    volatile uint32_t *vram_back = (volatile uint32_t*)0x06010000;
+    volatile uint32_t *flash_vram_back = flash_sector4 + (0x8000 / 4);
+    for (uint32_t i = 0; i < 0x8000 / 4; i++) {
+        vram_back[i] = flash_vram_back[i];
     }
     
     // 3. VRAM恢复
@@ -541,11 +540,13 @@ __attribute__((target("arm"))) void load_from_flash(void)
         vram[i] = flash_sector5[i];
     }
     
-    // 恢复VRAM后32KB和OAM - 从扇区6
+    // 恢复调色板和OAM - 从扇区6
     volatile uint32_t *flash_sector6 = (volatile uint32_t*)(flash_base_addr + VRAM_BACK_MISC_SECTOR * SECTOR_SIZE);
-    volatile uint32_t *vram_back = (volatile uint32_t*)0x06010000;
-    for (uint32_t i = 0; i < 0x8000 / 4; i++) {
-        vram_back[i] = flash_sector6[i];
+    
+    // 恢复调色板 (1KB) - 从扇区6开头
+    volatile uint32_t *palette = (volatile uint32_t*)0x05000000;
+    for (uint32_t i = 0; i < 0x400 / 4; i++) {
+        palette[i] = flash_sector6[i];
     }
     
     // 恢复OAM (1KB) - 使用u32拷贝
@@ -1190,12 +1191,12 @@ __attribute__((target("arm"))) void save_ewram_to_flash(int flash_type_index)
     }
 }
 
-// 保存IWRAM和调色板到Flash扇区4
+// 保存IWRAM和VRAM后半部分到Flash扇区4
 __attribute__((target("arm"))) void save_iwram_palette_to_flash(int flash_type_index)
 {
     volatile uint8_t *sram = (volatile uint8_t*)0x0E000000;
     
-    // 先清空SRAM（因为IWRAM+调色板不会占满64KB）
+    // 先清空SRAM
     for (uint32_t i = 0; i < SECTOR_SIZE; i++) {
         sram[i] = 0;
     }
@@ -1206,11 +1207,11 @@ __attribute__((target("arm"))) void save_iwram_palette_to_flash(int flash_type_i
         sram[i] = iwram[i];
     }
     
-    // 复制调色板 (1KB) 到SRAM的0x8000偏移（与EZODE一致）
-    volatile uint8_t *palette = (volatile uint8_t*)0x05000000;
-    volatile uint8_t *sram_palette = sram + 0x8000;
-    for (uint32_t i = 0; i < 0x400; i++) {
-        sram_palette[i] = palette[i];
+    // 复制VRAM后32KB (0x06010000) 到SRAM的0x8000偏移
+    volatile uint8_t *vram_back = (volatile uint8_t*)0x06010000;
+    volatile uint8_t *sram_vram = sram + 0x8000;
+    for (uint32_t i = 0; i < 0x8000; i++) {
+        sram_vram[i] = vram_back[i];
     }
     
     // 写入到扇区4
@@ -1242,13 +1243,13 @@ __attribute__((target("arm"))) void save_vram_back_misc_to_flash(int flash_type_
         sram[i] = 0;
     }
     
-    // 1. 复制VRAM后32KB (0x06010000) 到SRAM的0x0000偏移
-    volatile uint8_t *vram_back = (volatile uint8_t*)0x06010000;
-    for (uint32_t i = 0; i < 0x8000; i++) {
-        sram[i] = vram_back[i];
+    // 1. 复制调色板 (1KB) 到SRAM的0x0000偏移
+    volatile uint8_t *palette = (volatile uint8_t*)0x05000000;
+    for (uint32_t i = 0; i < 0x400; i++) {
+        sram[i] = palette[i];
     }
     
-    // 2. 复制OAM (1KB) 到SRAM的0x8000偏移
+    // 2. 复制OAM (1KB) 到SRAM的0x8000偏移（保持原位置）
     volatile uint8_t *oam = (volatile uint8_t*)0x07000000;
     volatile uint8_t *sram_oam = sram + 0x8000;
     for (uint32_t i = 0; i < 0x400; i++) {
