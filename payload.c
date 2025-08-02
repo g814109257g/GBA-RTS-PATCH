@@ -210,8 +210,8 @@ asm("spend_0x80:\n"
 #define TOTAL_SECTORS 8        // 8 sectors total (512KB / 64KB)
 #define SRAM_SAVE_SECTOR 7     // 默认使用扇区7保存SRAM
 #define EWRAM_START_SECTOR 0   // EWRAM从扇区0开始，占用0-3
-#define IWRAM_PALETTE_SECTOR 4 // IWRAM和调色板保存在扇区4
-#define VRAM_FRONT_SECTOR 5    // VRAM前64KB保存在扇区5
+#define VRAM_FRONT_SECTOR 4    // VRAM前64KB保存在扇区4
+#define IWRAM_PALETTE_SECTOR 5 // IWRAM和调色板保存在扇区5
 #define VRAM_BACK_MISC_SECTOR 6 // VRAM后32KB、OAM、IO寄存器等保存在扇区6
 
 // 定义获取相对地址的宏
@@ -245,9 +245,9 @@ void restore_sram_from_sector(int sector_num);
 void erase_all_sectors(int flash_type_index);
 void write_sram_to_sector(int sector_num, int flash_type_index);
 void save_ewram_to_flash(int flash_type_index);
-void save_iwram_palette_to_flash(int flash_type_index);
+void save_iwram_vram_back_to_flash(int flash_type_index);
 void save_vram_front_to_flash(int flash_type_index);
-void save_vram_back_misc_to_flash(int flash_type_index);
+void save_misc_to_flash(int flash_type_index);
 bool check_rts_save_flag(void);
 
 // 裸汇编入口函数 - 调用init_before_game然后跳转到原始入口点
@@ -454,15 +454,15 @@ __attribute__((target("arm"))) uint32_t init_before_game(void)
         
         // 保存EWRAM到扇区0-3
         save_ewram_to_flash(flash_type_index);
-        
-        // 保存IWRAM和调色板到扇区4
-        save_iwram_palette_to_flash(flash_type_index);
-        
-        // 保存VRAM前64KB到扇区5
+
+        // 保存VRAM前64KB到扇区4
         save_vram_front_to_flash(flash_type_index);
+
+        // 保存IWRAM和VRAM后半部分到扇区5
+        save_iwram_vram_back_to_flash(flash_type_index);
         
-        // 保存VRAM后半部分、OAM、IO寄存器等到扇区6
-        save_vram_back_misc_to_flash(flash_type_index);
+        // 保存调色板、OAM、IO寄存器等到扇区6
+        save_misc_to_flash(flash_type_index);
         
         // 恢复SRAM为原状
         restore_sram_from_sector(SRAM_SAVE_SECTOR);
@@ -650,7 +650,7 @@ __attribute__((target("arm"))) void load_from_flash(void)
         
         // 恢复IWRAM - 纯寄存器实现
         "ldr r2, %[flash_base]\n"           // r2 = flash基地址
-        "mov r3, #0x40000\n"                // r3 = IWRAM_PALETTE_SECTOR * SECTOR_SIZE
+        "mov r3, #0x50000\n"                // r3 = IWRAM_PALETTE_SECTOR * SECTOR_SIZE
         "add r2, r2, r3\n"                  // r2 = flash扇区4地址
         "mov r3, #0x03000000\n"             // r3 = IWRAM地址
         "mov r4, #0x8000\n"                 // r4 = 32KB计数器
@@ -1191,15 +1191,11 @@ __attribute__((target("arm"))) void save_ewram_to_flash(int flash_type_index)
     }
 }
 
-// 保存IWRAM和VRAM后半部分到Flash扇区4
-__attribute__((target("arm"))) void save_iwram_palette_to_flash(int flash_type_index)
+// 保存IWRAM和VRAM后半部分到Flash扇区5
+__attribute__((target("arm"))) void save_iwram_vram_back_to_flash(int flash_type_index)
 {
     volatile uint8_t *sram = (volatile uint8_t*)0x0E000000;
     
-    // 先清空SRAM
-    for (uint32_t i = 0; i < SECTOR_SIZE; i++) {
-        sram[i] = 0;
-    }
     
     // 复制IWRAM (32KB) 到SRAM的0x0000偏移
     volatile uint8_t *iwram = (volatile uint8_t*)0x03000000;
@@ -1214,11 +1210,11 @@ __attribute__((target("arm"))) void save_iwram_palette_to_flash(int flash_type_i
         sram_vram[i] = vram_back[i];
     }
     
-    // 写入到扇区4
+    // 写入到扇区5
     write_sram_to_sector(IWRAM_PALETTE_SECTOR, flash_type_index);
 }
 
-// 保存VRAM前64KB到Flash扇区5
+// 保存VRAM前64KB到Flash扇区4
 __attribute__((target("arm"))) void save_vram_front_to_flash(int flash_type_index)
 {
     volatile uint8_t *vram = (volatile uint8_t*)0x06000000;
@@ -1229,12 +1225,12 @@ __attribute__((target("arm"))) void save_vram_front_to_flash(int flash_type_inde
         sram[i] = vram[i];
     }
     
-    // 写入到扇区5
+    // 写入到扇区4
     write_sram_to_sector(VRAM_FRONT_SECTOR, flash_type_index);
 }
 
 // 保存VRAM后半部分、OAM、IO寄存器等到Flash扇区6
-__attribute__((target("arm"))) void save_vram_back_misc_to_flash(int flash_type_index)
+__attribute__((target("arm"))) void save_misc_to_flash(int flash_type_index)
 {
     volatile uint8_t *sram = (volatile uint8_t*)0x0E000000;
     
