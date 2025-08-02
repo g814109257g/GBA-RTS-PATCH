@@ -280,6 +280,18 @@ __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
         "ldr r12, spend_0x80\n"
         "stmia r12!, {r3-r11,sp,lr}\n"   // 一次性保存r3(SPSR)到lr
         "\n"
+        // 保存系统模式的SP和LR到spend_0x80+0x30
+        "mrs r0, CPSR\n"                 // 备份当前CPSR
+        "mov r1, #0xDF\n"                // 系统模式
+        "msr cpsr_cf, r1\n"
+        "nop\n"
+        "mov r2, sp\n"                   // 获取系统模式SP
+        "ldr r3, spend_0x80\n"           // 获取spend_0x80地址
+        "add r3, r3, #0x30\n"            // 偏移到+0x30
+        "stmia r3!, {r2, lr}\n"          // 保存SP和LR
+        "msr cpsr_cf, r0\n"              // 恢复IRQ模式
+        "nop\n"
+        "\n"
         "b keypad_process\n"
     );
 }
@@ -1252,22 +1264,7 @@ __attribute__((target("arm"))) void save_misc_to_flash(int flash_type_index)
         sram_oam[i] = oam[i];
     }
     
-    // 3. 保存系统模式的SP和LR到spend_0x80+0x30
-    // 必须在一个asm块中完成整个操作
-    asm volatile(
-        "mrs r0, CPSR\n"            // 备份当前CPSR
-        "adrl r7, spend_0x80\n"     
-        "ldr r7,[r7]\n"         // 获取spend_0x80的地址
-        "add r7,#0x30\n"         // 指向spend_0x80+0x30
-        "mov r1, #0xDF\n"           // 系统模式
-        "msr cpsr_cf, r1\n"
-        "nop\n"
-        "mov r6, sp\n"              // 获取系统模式SP
-        "stmia r7!, {r6, lr}\n"     // 保存SP和LR到spend_0x80+0x30
-        "msr cpsr_cf, r0\n"         // 恢复IRQ模式
-        "nop\n"
-        : : : "r0", "r1", "r6", "r7", "memory"
-    );
+    // 3. 系统模式的SP和LR已经在IRQ入口处保存了，这里不需要再保存
     
     // 4. 复制spend_0x80的内容(128字节)到SRAM的0x8400偏移
     volatile uint8_t *spend_src = (volatile uint8_t*)SPEND_0x80_ADDR;
