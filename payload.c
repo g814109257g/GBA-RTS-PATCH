@@ -287,7 +287,7 @@ __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
         "nop\n"
         "mov r2, sp\n"                   // 获取系统模式SP
         "ldr r3, spend_0x80\n"           // 获取spend_0x80地址
-        "add r3, r3, #0x30\n"            // 偏移到+0x30
+        "add r3, r3, #0x2C\n"            // 偏移到+0x2C
         "stmia r3!, {r2, lr}\n"          // 保存SP和LR
         "msr cpsr_cf, r0\n"              // 恢复IRQ模式
         "nop\n"
@@ -297,16 +297,13 @@ __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
 }
 /*此时临时缓冲区内容:（优化后的布局，只需60字节）
 
-0x00-0x03 (4字节): IRQ模式下的SPSR寄存器(r3)
-0x04-0x23 (32字节): IRQ模式下的r4-r11寄存器  
-0x24-0x27 (4字节): IRQ模式下的sp寄存器
-0x28-0x2B (4字节): IRQ模式下的lr寄存器
-0x2C-0x2F (4字节): 空洞
-0x30-0x33 (4字节): 系统模式的SP
-0x34-0x37 (4字节): 系统模式的LR
-0x38-0x3B (4字节): 空洞
-0x40-0x47 (8字节): DMA控制寄存器(DMA0-3的CNT_H)
-总共使用: 4+32+4+4+4+4+8 = 60字节
+0x00 (4字节): IRQ模式下的SPSR寄存器(r3)
+0x04 (32字节): IRQ模式下的r4-r11寄存器  
+0x24 (4字节): IRQ模式下的sp寄存器
+0x28 (4字节): IRQ模式下的lr寄存器
+0x30 (4字节): 系统模式的SP
+0x34 (4字节): 系统模式的LR
+总共使用: 4+32+4+4+4+4 = 52字节
 音频寄存器在save_misc_to_flash中直接从硬件读取并写入SRAM
 */
 __attribute__((target("arm"))) int detect_keys(void)
@@ -641,7 +638,7 @@ __attribute__((target("arm"))) void load_from_flash(void)
         "msr cpsr_cf, r1\n"
         "nop\n"
         
-        "add r7, r7, #0x30\n"           // 跳到系统模式SP/LR位置 (0x8400+0x30)
+        "add r7, r7, #0x2C\n"           // 跳到系统模式SP/LR位置 (0x8400+0x2C)
         "ldmia r7!,{r13-r14}\n"         // 直接从Flash恢复r13-r14,即SP和LR寄存器
         
         "msr cpsr_cf, r0\n"             // 恢复CPSR,即，切换回到IRQ模式
