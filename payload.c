@@ -623,28 +623,29 @@ __attribute__((target("arm"))) void load_from_flash(void)
     }
     
         // 恢复IWRAM和调色板 - 从扇区4
-    // 恢复系统模式SP和LR寄存器
+    // 恢复系统模式SP和LR寄存器 - 直接从Flash读取
     // 这需要切换到系统模式，恢复寄存器，然后切换回来
     asm volatile(
         "mrs r0, cpsr\n"                // 保存当前CPSR
-        "adrl r7, spend_0x80\n"         // 
-        "ldr r7, [r7]\n"               // 读取spend_0x80地址
+        
+        // 直接从Flash读取SPSR
+        "ldr r7, %[flash_sector6]\n"    // r7 = flash扇区6基地址
+        "add r7, r7, #0x8400\n"         // r7 = flash扇区6 + 0x8400 (spend_0x80位置)
+        "ldr r2, [r7]\n"                // 直接从Flash读取SPSR
+        "msr spsr_cxsf, r2\n"           // 恢复SPSR irq状态
 
-        "ldmia r7!,{r2}\n"      // 读取SPSR (r7从0x00开始，读后r7=0x04)
-        "msr spsr_cxsf, r2\n"          // 恢复SPSR irq状态
-
-        "mov r1,#0xDF\n"          // 切换到系统模式
+        "mov r1,#0xDF\n"                // 切换到系统模式
         "msr cpsr_cf, r1\n"
         "nop\n"
         
-        "add r7,#0x2C\n"          // 跳过r4-r11,sp,lr，到达系统模式SP/LR位置 (r7 = 0x04+0x2C = 0x30)
-        "ldmia r7!,{r13-r14}\n" // 恢复r13-r14,即SP和LR寄存器
+        "add r7, r7, #0x30\n"           // 跳到系统模式SP/LR位置 (0x8400+0x30)
+        "ldmia r7!,{r13-r14}\n"         // 直接从Flash恢复r13-r14,即SP和LR寄存器
         
-        "msr cpsr_cf, r0\n"          // 恢复CPSR,即，切换回到IRQ模式
+        "msr cpsr_cf, r0\n"             // 恢复CPSR,即，切换回到IRQ模式
         "nop\n"
         :
-        :
-        : "r0", "r1", "r2", "r3", "r4", "r5", "r7", "memory"
+        : [flash_sector6] "m" (flash_sector6_u8)
+        : "r0", "r1", "r2", "r7", "memory"
     );
     
     ////////////////////////////////////////////////////////////////////////////////////////
