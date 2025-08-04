@@ -615,12 +615,6 @@ __attribute__((target("arm"))) void load_from_flash(void)
     // 清零中断标志寄存器 IF (Interrupt Request Flags / IRQ Acknowledge)
     io_base[0x0202 / 2] = 0;
     
-    // 恢复spend_0x80区域（60字节）- 从扇区6的0x8400偏移 - 使用u32拷贝
-    volatile uint32_t *spend = (volatile uint32_t*)SPEND_0x80_ADDR;
-    volatile uint32_t *flash_spend = (volatile uint32_t*)(flash_sector6_u8 + 0x8400);
-    for (uint32_t i = 0; i < 60 / 4; i++) {  // 60字节 = 15个32位字
-        spend[i] = flash_spend[i];
-    }
     
         // 恢复IWRAM和调色板 - 从扇区4
     // 恢复系统模式SP和LR寄存器 - 直接从Flash读取
@@ -667,29 +661,28 @@ __attribute__((target("arm"))) void load_from_flash(void)
     *green_swap_reg = 0;
     
     // 恢复IRQ模式的寄存器并跳转到原始中断处理程序
-    // 与EZODE实现一致
     asm volatile(
         
         // 恢复IWRAM - 纯寄存器实现
+        "ldr r12, %[spend_0x80]\n"
         "ldr r2, %[sector_addr]\n"           // r2 = flash基地址
         "mov r3, #0x03000000\n"             // r3 = IWRAM地址
         "mov r4, #0x8000\n"                 // r4 = 32KB计数器
-        
-        "1:\n"                              // 循环标签
+
+        "iwram_copy_loop:\n"                              // 循环标签
         "ldr r5, [r2], #4\n"                // 从flash读取4字节，并递增r2
         "str r5, [r3], #4\n"                // 写入IWRAM，并递增r3
         "subs r4, r4, #4\n"                 // 递减计数器
-        "bne 1b\n"                          // 如果不为0，继续循环
-        
-        "adrl r12, spend_0x80\n"
-        "ldr r12, [r12]\n"
+        "bne iwram_copy_loop\n"                          // 如果不为0，继续循环
+
         "ldmia r12!, {r3-r11,sp,lr}\n"
         "\n"
         "mov r0, #0x04000000\n"
         "ldr pc, [r0, #-(0x04000000-0x03FFFFF4)]\n"  // 跳转到原始IRQ处理程序
         :
-        : [sector_addr] "m" (flash_sector4)
-        :
+        : [sector_addr] "m" (flash_sector4),
+          [spend_0x80] "m" (spend_0x80_on_flash)
+        : "memory"
     );
 }
     
