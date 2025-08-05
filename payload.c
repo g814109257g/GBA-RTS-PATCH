@@ -271,47 +271,71 @@ __attribute__((naked, target("arm"))) void keypad_irq_handler(void)
         "ldr pc, [r0, #-(0x04000000-0x03FFFFF4)]\n" // 跳转到原始IRQ处理程序
 
         "call_handler:\n"
-        // 在IRQ栈上分配52字节空间作为临时缓冲区
-        "sub sp, sp, #52\n"              // 分配栈空间
-        "mov r12, sp\n"                  // r12 = 缓冲区地址
+        // 第一步：立即保存SPSR，因为模式切换会改变它
+        "mrs r0, SPSR\n"                 // r0 = SPSR (必须最先保存)
+        "mrs r1, CPSR\n"                 // r1 = 当前CPSR (IRQ模式)
         
-        // 保存LR，因为BL会破坏它
+        // 第二步：切换到系统模式分配栈空间
+        "mov r2, #0xDF\n"                // 系统模式
+        "msr cpsr_cf, r2\n"
+        "nop\n"
+        "sub sp, sp, #52\n"              // 在系统栈上分配52字节
+        "mov r2, sp\n"                   // r2 = 系统栈缓冲区地址
+        
+        // 第三步：切换回IRQ模式保存IRQ寄存器
+        "msr cpsr_cf, r1\n"              // 恢复IRQ模式 
+        "nop\n"
+        
+        
+        // 第四步：保存IRQ模式寄存器到系统栈缓冲区
+        "mov r12, r2\n"                  // r12 = 缓冲区地址
+        "stmia r12!, {r0}\n"             // 保存SPSR(r0)
+        "stmia r12!, {r4-r11,sp,lr}\n"   // 保存r4-r11, IRQ的sp,lr
+        "\n"
+        
+        // 保存LR，因为BL调用会破坏它
         "push {lr}\n"
         
-        // 匹配了其中一个热键，保存寄存器并调用处理函数
-        "mrs r3, SPSR\n"                 // 先读取SPSR到r3
-        "stmia r12!, {r3-r11,sp,lr}\n"   // 一次性保存r3(SPSR)到lr到栈缓冲区
-        "\n"
-        // 保存系统模式的SP和LR到栈缓冲区+0x2C
-        "mrs r0, CPSR\n"                 // 备份当前CPSR
-        "mov r1, #0xDF\n"                // 系统模式
-        "msr cpsr_cf, r1\n"
+        // 第五步：再次切换到系统模式保存系统模式的SP和LR
+        "mov r3, #0xDF\n"                // 系统模式
+        "msr cpsr_cf, r3\n"
         "nop\n"
-        "mov r2, sp\n"                   // 获取系统模式SP
-        "add r3, sp, #0x2C\n"            // r3 = 栈缓冲区地址 + 0x2C偏移
-        "stmia r3!, {r2, lr}\n"          // 保存SP和LR
-        "msr cpsr_cf, r0\n"              // 恢复IRQ模式
+        "mov r0, sp\n"                   // r0 = 系统模式SP (注意：已经减了52)
+        "add r0, r0, #52\n"              // 恢复原始系统SP值
+        "add r3, r2, #0x2C\n"            // r3 = 缓冲区 + 0x2C偏移
+        "stmia r3!, {r0, lr}\n"          // 保存系统模式原始SP和LR
+        
+        // 第六步：切换回IRQ模式调用keypad_process
+        "msr cpsr_cf, r1\n"              // 切换回IRQ模式
         "nop\n"
-        "\n"
+        
         // 调用keypad_process
-        "mov r0, sp\n"                   // r0 = 栈缓冲区地址作为第一个参数
+        "mov r0, r2\n"                   // r0 = 缓冲区地址作为参数
         "bl keypad_process\n"            // keypad_process会处理原始IRQ调用
         "\n"
-        // keypad_process返回后恢复栈
+        // 第七步：返回后恢复栈并返回BIOS
+        "mrs r1, CPSR\n"                 // r1 = 当前CPSR (IRQ模式)
+        "mov r3, #0xDF\n"                // 切换到系统模式恢复栈
+        "msr cpsr_cf, r3\n"
+        "nop\n"
+        "add sp, sp, #52\n"              // 恢复系统栈指针
+        "msr cpsr_cf, r1\n"              // 直接恢复原CPSR (IRQ模式)
+        "nop\n"
+        
         "pop {lr}\n"                     // 恢复LR
-        "add sp, sp, #52\n"              // 恢复栈指针
         "mov pc, lr\n"                   // 返回到BIOS
     );
 }
-/*此时临时缓冲区内容:（优化后的布局，只需60字节）
+/*此时临时缓冲区内容:（系统栈分配，52字节）
 
-0x00 (4字节): IRQ模式下的SPSR寄存器(r3)
+0x00 (4字节): IRQ模式下的SPSR寄存器
 0x04 (32字节): IRQ模式下的r4-r11寄存器  
 0x24 (4字节): IRQ模式下的sp寄存器
 0x28 (4字节): IRQ模式下的lr寄存器
-0x30 (4字节): 系统模式的SP
-0x34 (4字节): 系统模式的LR
+0x2C (4字节): 系统模式的SP（原始值）
+0x30 (4字节): 系统模式的LR
 总共使用: 4+32+4+4+4+4 = 52字节
+缓冲区分配在系统模式栈上，避免IRQ栈溢出
 音频寄存器在save_misc_to_flash中直接从硬件读取并写入SRAM
 */
 __attribute__((target("arm"))) int detect_keys(void)
