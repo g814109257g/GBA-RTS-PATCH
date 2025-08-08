@@ -10,6 +10,10 @@
 #ifdef _MSC_VER
 #define strcasecmp _stricmp
 #include <conio.h>
+#elif defined(_WIN32) || defined(__CYGWIN__) || defined(__MSYS__)
+// MSYS2/MinGW/Cygwin 环境
+#define strcasecmp _stricmp
+#include <conio.h>
 #else
 #include <termios.h>
 #include <unistd.h>
@@ -29,9 +33,13 @@ static void press_any_key(void)
     printf("Press any key to continue...");
     fflush(stdout);
     
-#ifdef _MSC_VER
-    // Windows 使用 _getch()
-    _getch();
+#if defined(_MSC_VER) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MSYS__)
+    // Windows/MSYS2/MinGW/Cygwin 环境使用 _getch() 或 getch()
+    #ifdef _MSC_VER
+        _getch();
+    #else
+        getch();  // MinGW/MSYS2 中使用 getch()
+    #endif
 #else
     // Linux/Unix 使用 termios 来实现单字符输入
     struct termios old_termios, new_termios;
