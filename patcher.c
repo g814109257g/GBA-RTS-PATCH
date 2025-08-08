@@ -9,6 +9,10 @@
 
 #ifdef _MSC_VER
 #define strcasecmp _stricmp
+#include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
 #endif
 
 FILE *romfile;
@@ -18,6 +22,36 @@ uint32_t romsize;
 uint8_t rom[0x02000000];
 char signature[] = "<3 from Maniac";
 #define RTS_SIZE (448 * 1024)  // 448KB
+
+// 跨平台的"按任意键继续"函数
+static void press_any_key(void)
+{
+    printf("Press any key to continue...");
+    fflush(stdout);
+    
+#ifdef _MSC_VER
+    // Windows 使用 _getch()
+    _getch();
+#else
+    // Linux/Unix 使用 termios 来实现单字符输入
+    struct termios old_termios, new_termios;
+    
+    // 获取当前终端设置
+    tcgetattr(STDIN_FILENO, &old_termios);
+    new_termios = old_termios;
+    
+    // 设置为原始模式：不回显，不需要按回车
+    new_termios.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
+    
+    // 读取一个字符
+    getchar();
+    
+    // 恢复原来的终端设置
+    tcsetattr(STDIN_FILENO, TCSANOW, &old_termios);
+#endif
+    printf("\n");
+}
 
 
 static uint8_t *memfind(uint8_t *haystack, size_t haystack_size, uint8_t *needle, size_t needle_size, int stride)
@@ -35,12 +69,16 @@ static uint8_t *memfind(uint8_t *haystack, size_t haystack_size, uint8_t *needle
 int main(int argc, char **argv)
 {
     // 检查参数数量，必须为2或3（程序名+ROM文件名+可选的RTS文件）
+    puts("GBA RTS Patcher - Written by Ausar (Based on Maniac's batteryless patcher)");
     if (argc != 2 && argc != 3)
     {
         puts("Usage: patcher <rom.gba> [save.rts]");
         puts("       rom.gba  - GBA ROM file to patch");
         puts("       save.rts - Optional 448KB RTS save file to embed");
-        scanf("%*s");
+        puts("Or: just drag and drop a .gba file onto this executable");
+        puts("       The output will be <rom_keypad.gba>");
+        puts("最简单的用法是直接拖放一个.gba文件到这个程序上");
+        press_any_key();
         return 1;
     }
 
@@ -52,7 +90,7 @@ int main(int argc, char **argv)
     if (romfilename_len < 4 || strcasecmp(argv[1] + romfilename_len - 4, ".gba"))
     {
         puts("File does not have .gba extension.");
-        scanf("%*s");
+        press_any_key();
         return 1;
     }
 
@@ -61,7 +99,7 @@ int main(int argc, char **argv)
     {
         puts("Could not open input file");
         puts(strerror(errno));
-        scanf("%*s");
+        press_any_key();
         return 1;
     }
 
@@ -72,7 +110,7 @@ int main(int argc, char **argv)
     if (romsize > sizeof rom)
     {
         puts("ROM too large - not a GBA ROM?");
-        scanf("%*s");
+        press_any_key();
         return 1;
     }
 
@@ -91,7 +129,7 @@ int main(int argc, char **argv)
     if (memfind(rom, romsize, signature, sizeof signature - 1, 4))
     {
         puts("Signature found. ROM already patched!");
-        scanf("%*s");
+        press_any_key();
         return 1;
     }
 
@@ -112,7 +150,7 @@ int main(int argc, char **argv)
     if (!found_irq)
     {
         puts("Could not find any reference to the IRQ handler. Has the ROM already been patched?");
-        scanf("%*s");
+        press_any_key();
         return 1;
     }
 
@@ -147,7 +185,7 @@ int main(int argc, char **argv)
         if (romsize + reserved_space > 0x2000000)
         {
             puts("ROM already max size. Cannot expand. Cannot install payload");
-            scanf("%*s");
+            press_any_key();
             return 1;
         }
         else
@@ -187,7 +225,7 @@ int main(int argc, char **argv)
         if (rtsfilename_len < 4 || strcasecmp(argv[2] + rtsfilename_len - 4, ".rts"))
         {
             puts("Second file does not have .rts extension.");
-            scanf("%*s");
+            press_any_key();
             return 1;
         }
         
@@ -196,7 +234,7 @@ int main(int argc, char **argv)
         {
             puts("Could not open RTS file");
             puts(strerror(errno));
-            scanf("%*s");
+            press_any_key();
             return 1;
         }
         
@@ -207,7 +245,7 @@ int main(int argc, char **argv)
         {
             printf("RTS file size must be exactly 448KB (458752 bytes), but got %ld bytes\n", rtssize);
             fclose(rtsfile);
-            scanf("%*s");
+            press_any_key();
             return 1;
         }
         
@@ -217,7 +255,7 @@ int main(int argc, char **argv)
         {
             puts("Failed to read RTS file");
             fclose(rtsfile);
-            scanf("%*s");
+            press_any_key();
             return 1;
         }
         fclose(rtsfile);
@@ -232,7 +270,7 @@ int main(int argc, char **argv)
     if (rom[3] != 0xea)
     {
         puts("Unexpected entrypoint instruction");
-        scanf("%*s");
+        press_any_key();
         return 1;
     }
     // 解析原ROM入口点（ARM跳转指令格式）
@@ -263,14 +301,17 @@ int main(int argc, char **argv)
     {
         puts("Could not open output file");
         puts(strerror(errno));
-        scanf("%*s");
+        press_any_key();
         return 1;
     }
 
     fwrite(rom, 1, romsize, outfile);
     fflush(outfile);
 
-    printf("Patched successfully (keypad mode). Changes written to %s\n", new_filename);
-    // scanf("%*s");
+    printf("Patched successfully. Changes written to %s\n", new_filename);
+    printf("RTS save: L + R + Start\n");
+    printf("RTS load: A + B + Select\n");
+    printf("成功打上了RTS补丁。修改已写入 %s\n", new_filename);
+    press_any_key();
     return 0;
 }
