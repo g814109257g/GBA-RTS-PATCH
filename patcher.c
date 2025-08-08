@@ -6,6 +6,10 @@
  *
  * Commercial use is prohibited without authorization. Any derivative project using this code must remain open source and clearly indicate the original repository address (https://github.com/ArcheyChen/GBA-RTS-PATCH).
  * Identification strings in the code such as "Ausar'S-RTSFILE." and "<3 from Maniac" must not be altered and should be preserved as is.
+ *
+ * 免责声明 / Disclaimer
+ * 本代码按“原样”提供，不对其适用性、功能性或适合任何特定用途作出任何明示或暗示的保证。使用本代码所产生的任何后果和风险由使用者自行承担，作者不承担任何责任。
+ * This code is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the code or the use or other dealings in the code.
  */
 
 #include <errno.h>
@@ -94,6 +98,10 @@ int main(int argc, char **argv)
     puts("");
     puts("Commercial use is prohibited without authorization. Any derivative project using this code must remain open source and clearly indicate the original repository address (https://github.com/ArcheyChen/GBA-RTS-PATCH).");
     puts("Identification strings in the code such as 'Ausar'S-RTSFILE.' and '<3 from Maniac' must not be altered and should be preserved as is.");
+    puts("");
+    puts("免责声明 / Disclaimer");
+    puts("本代码按“原样”提供，不对其适用性、功能性或适合任何特定用途作出任何明示或暗示的保证。使用本代码所产生的任何后果和风险由使用者自行承担，作者不承担任何责任。");
+    puts("This code is provided 'as is', without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the code or the use or other dealings in the code.");
     puts("============================================================");
     // 检查参数数量，必须为2或3（程序名+ROM文件名+可选的RTS文件）
     puts("GBA RTS Patcher - Written by Ausar (Based on Maniac's batteryless patcher)");
