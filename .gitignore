@@ -1,0 +1,8 @@
+*.exe
+*.out
+payload_bin.c
+payload.bin
+payload.elf
+
+# Web构建产物
+web-patcher/payload-data.js
