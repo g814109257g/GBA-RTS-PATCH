@@ -331,7 +331,6 @@ int main(int argc, char **argv)
     // 拷贝payload_bin到ROM指定位置
     memcpy(rom + payload_base, payload_bin, payload_bin_len);
     struct PayloadHeader *header = (struct PayloadHeader*)&rom[payload_base];
-    // 设置payload中的rts_size字段：高20位=存档大小，低12位=write buffer大小
     header->rts_size = reserved_space;
     header->save_size = detected_save_size;
     header->wbuf_size = wbuf;
