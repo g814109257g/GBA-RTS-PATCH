@@ -331,10 +331,12 @@ int main(int argc, char **argv)
     // 拷贝payload_bin到ROM指定位置
     memcpy(rom + payload_base, payload_bin, payload_bin_len);
     struct PayloadHeader *header = (struct PayloadHeader*)&rom[payload_base];
-    // 设置payload中的save_size字段：高20位=存档大小，低12位=write buffer大小
-    header->save_size = (reserved_space & 0xFFFFFF000) | (wbuf & 0xFFF);
+    // 设置payload中的rts_size字段：高20位=存档大小，低12位=write buffer大小
+    header->rts_size = reserved_space;
+    header->save_size = detected_save_size;
+    header->wbuf_size = wbuf;
 
-    printf("  Combined save_size field: 0x%08X\n", header->save_size);
+    printf("  Combined rts_size field: 0x%08X\n", header->rts_size);
     // 计算并输出SRAM保存空间的基址（在payload之后）
     uint32_t sram_save_base = payload_base + payload_bin_len;
     printf("SRAM save space offset: 0x%X\n", sram_save_base);

@@ -3,14 +3,19 @@
 #include <stdbool.h>
 #include "payload_header.h"
 
+#define PROGRAM_ARGS_SAVE_SIZE(x) ((x) & (~0xFFF))
+#define PROGRAM_ARGS_WBUF_SIZE(x) ((x) & 0xFFF)
+
 // 前向声明
 void patched_entrypoint(void);
 
 // Payload头部结构 - 必须在文件最开始,然后必须是强行改为text，否则无法获取相对偏移 
 __attribute__((section(".text"))) const struct PayloadHeader payload_header = {
     .original_entrypoint = 0x080000c0,
-    .ctrl_flag = 0,                    // 控制标志 留作备用
-    .save_size = 0x20000,              // 默认128KB，高20位=存档大小，低12位=写缓冲区大小
+    .ctrl_flag = 0xF0,                 // 控制标志 留作备用，0xF0代表这是RTS
+    .rts_size = 0x80000,               // RTS(包含存档)大小
+    .save_size = 0x10000,              // 存档大小
+    .wbuf_size = 0,              // 写缓冲区大小
     .patched_entrypoint_addr = (uint32_t)patched_entrypoint
 };
 
@@ -482,11 +487,11 @@ __attribute__((target("arm"))) uint32_t init_before_game(void)
     
     // 如果找到匹配的flash，执行擦除和写入
     if (identify_result != 0 && flash_type_index >= 0) {
-        // 先擦除整个448KB+save_size
-        erase_all_sectors(flash_type_index, (header->save_size & (~0xFFF))); // 清除低12位
+        // 先擦除整个448KB+rts_size
+        erase_all_sectors(flash_type_index, header->rts_size);
         
         // 保存原始SRAM到扇区7(-8)
-        write_sram_to_sector(SRAM_SAVE_SECTOR, flash_type_index, (header->save_size - 0x70000));
+        write_sram_to_sector(SRAM_SAVE_SECTOR, flash_type_index, header->save_size);
         
         // 保存EWRAM到扇区0-3
         save_ewram_to_flash(flash_type_index);
@@ -501,7 +506,7 @@ __attribute__((target("arm"))) uint32_t init_before_game(void)
         save_misc_to_flash(flash_type_index, rts_regs, cpu_regs_addr);
         
         // 恢复SRAM为原状
-        restore_sram_from_sector(SRAM_SAVE_SECTOR, ((header->save_size - 0x70000) & (~0xFFF)));
+        restore_sram_from_sector(SRAM_SAVE_SECTOR, header->save_size);
     }
     
     // 禁用绿色交换
@@ -869,14 +874,14 @@ void __attribute__((target("arm"))) erase_flash_1(unsigned sa, unsigned size)
 asm(".align 4\n"
     "erase_flash_1_end:");
 
-void __attribute__((target("arm"))) program_flash_1(unsigned sa, unsigned save_size)
+void __attribute__((target("arm"))) program_flash_1(unsigned sa, unsigned save_size_with_wbuf)
 {
     // Write data
     SRAM_BANK_SEL = 0;
     int i=0;
-    save_size &= 0x3FFFF;
-    const int wbuf = save_size & 0xFFF;
-    for (;i<(save_size & (~0xFFF));) {
+    unsigned save_size = PROGRAM_ARGS_SAVE_SIZE(save_size_with_wbuf);
+    const int wbuf = PROGRAM_ARGS_WBUF_SIZE(save_size_with_wbuf);
+    for (;i<save_size;) {
         if (i == AGB_SRAM_SIZE) SRAM_BANK_SEL = 1;
         if (wbuf) {
             _FLASH_WRITE(sa, 0xE8);
@@ -965,17 +970,17 @@ void __attribute__((target("arm"))) erase_flash_2(unsigned sa, unsigned size)
 asm(".align 4\n"
     "erase_flash_2_end:");
 
-void __attribute__((target("arm"))) program_flash_2(unsigned sa, unsigned save_size)
+void __attribute__((target("arm"))) program_flash_2(unsigned sa, unsigned save_size_with_wbuf)
 {
     // Write data
     SRAM_BANK_SEL = 0;
-    save_size &= 0x3FFFF;
-    const int wbuf = save_size & 0xFFF;
+    unsigned save_size = PROGRAM_ARGS_SAVE_SIZE(save_size_with_wbuf);
+    const int wbuf = PROGRAM_ARGS_WBUF_SIZE(save_size_with_wbuf);
     uint32_t last_addr;
     uint16_t expected_data;
     uint16_t status1, status2;
     int i=0;
-    for (;i<(save_size&(~0xFFF));) {
+    for (;i<save_size;) {
         if (i == AGB_SRAM_SIZE)
             SRAM_BANK_SEL = 1;
         if (wbuf) {
@@ -1088,17 +1093,17 @@ void __attribute__((target("arm"))) erase_flash_3(unsigned sa, unsigned size)
 asm(".align 4\n"
     "erase_flash_3_end:");
 
-void __attribute__((target("arm"))) program_flash_3(unsigned sa, unsigned save_size)
+void __attribute__((target("arm"))) program_flash_3(unsigned sa, unsigned save_size_with_wbuf)
 {
     // Write data
     SRAM_BANK_SEL = 0;
-    save_size &= 0x3FFFF;
-    const int wbuf = save_size & 0xFFF;
+    unsigned save_size = PROGRAM_ARGS_SAVE_SIZE(save_size_with_wbuf);
+    const int wbuf = PROGRAM_ARGS_WBUF_SIZE(save_size_with_wbuf);
     uint32_t last_addr;
     uint16_t expected_data;
     uint16_t status1, status2;
     int i=0;
-    for (;i<(save_size&(~0xFFF));) {
+    for (;i<save_size;) {
         if (i == AGB_SRAM_SIZE)
             SRAM_BANK_SEL = 1;
         if (wbuf) {
@@ -1223,10 +1228,11 @@ void __attribute__((target("arm"))) erase_flash_4(unsigned sa, unsigned size)
 asm(".align 4\n"
     "erase_flash_4_end:");
 
-void __attribute__((target("arm")))  program_flash_4(unsigned sa, unsigned save_size)
+void __attribute__((target("arm")))  program_flash_4(unsigned sa, unsigned save_size_with_wbuf)
 {
-    save_size &= 0x3FFFF;
-    save_size = save_size & (~0xFFF);
+    
+    unsigned save_size = PROGRAM_ARGS_SAVE_SIZE(save_size_with_wbuf);
+    const int wbuf = PROGRAM_ARGS_WBUF_SIZE(save_size_with_wbuf);
     // Write data
     int c = 0;
     SRAM_BANK_SEL = 0;
@@ -1316,7 +1322,7 @@ __attribute__((target("arm"))) void write_sram_to_sector(int sector_idx, int fla
         size = 0x20000;
     }
     // 写入64KB数据
-    run_arm_from_ram(sector_addr, size|(header->save_size&0xFFF), program_start, program_end);
+    run_arm_from_ram(sector_addr, size|(header->wbuf_size), program_start, program_end);
 }
 
 // 从指定扇区恢复SRAM（64KB）
